@@ -46,7 +46,7 @@ dependencies = [
     "dateparser",
     "hydra-core",
     "pandas",
-    "pydantic>=2",
+    "pydantic>=2.13.3",
 ]
 
 [project.optional-dependencies]
