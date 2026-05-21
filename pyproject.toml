@@ -42,7 +42,7 @@ dependencies = [
     "chatom",
     "croniter",
     "csp>=0.9,<1",
-    "csp-gateway>=2.5,<2.7",
+    "csp-gateway>=2.6.1,<2.7",
     "dateparser",
     "hydra-core",
     "pandas",
