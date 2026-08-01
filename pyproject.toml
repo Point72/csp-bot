@@ -39,7 +39,7 @@ classifiers = [
 
 dependencies = [
     "beautifulsoup4",
-    "ccflow>=0.5.2",
+    "ccflow>=0.9.0",
     "chatom>=0.2.0",
     "croniter",
     "csp>=0.9,<1",
