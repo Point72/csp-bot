@@ -3,7 +3,7 @@
 import asyncio
 import socket
 import threading
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -12,7 +12,7 @@ import pytest
 from chatom import Message, User
 from chatom.backend import BackendBase
 
-from csp_bot.commands.agent import AgentCommand, AgentCommandModel, AgentSession, SessionStore, _run_agent
+from csp_bot.commands.agent import AgentCommand, AgentCommandModel, AgentSession, SessionStore, _AgentRunControl, _run_agent
 from csp_bot.structs import BotCommand, CommandVariant
 
 
@@ -41,7 +41,9 @@ class ConcreteAgentCommand(AgentCommand):
 def cmd():
     """Fresh AgentCommand instance with clean state."""
     AgentCommand._futures = {}
+    AgentCommand._run_controls = {}
     AgentCommand._backends = {}
+    AgentCommand._backend_loops = {}
     AgentCommand._sessions = SessionStore(ttl_seconds=900.0)
     return ConcreteAgentCommand()
 
@@ -402,6 +404,59 @@ class TestExecute:
         mock_future.cancel.assert_called_once()
         assert key not in AgentCommand._futures
 
+    @pytest.mark.parametrize("use_backend_loop", [False, True])
+    def test_timeout_stops_active_agent_and_releases_worker(self, cmd, bot_command, use_backend_loop):
+        started = threading.Event()
+        cancelled = threading.Event()
+        release = threading.Event()
+
+        class BlockingAgent:
+            async def run(self, prompt, message_history=None):
+                started.set()
+                try:
+                    while not release.is_set():
+                        await asyncio.sleep(0.01)
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+
+        backend_loop = None
+        loop_thread = None
+        if use_backend_loop:
+            backend_loop = asyncio.new_event_loop()
+
+            def run_loop():
+                asyncio.set_event_loop(backend_loop)
+                backend_loop.run_forever()
+
+            loop_thread = threading.Thread(target=run_loop, daemon=True)
+            loop_thread.start()
+            AgentCommand._backend_loops = {bot_command.backend: backend_loop}
+
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            with patch("csp_bot.commands.agent._executor", executor), patch.object(cmd, "build_agent", return_value=BlockingAgent()):
+                cmd.preexecute(bot_command)
+                assert started.wait(timeout=1)
+
+                bot_command.times_run = cmd.timeout // cmd.poll_interval + 1
+                result = cmd.execute(bot_command)
+
+                assert isinstance(result, Message)
+                assert "timed out" in result.content.lower()
+                assert cancelled.wait(timeout=1)
+                assert cmd._command_key(bot_command) not in AgentCommand._run_controls
+                assert executor.submit(lambda: "released").result(timeout=1) == "released"
+        finally:
+            release.set()
+            executor.shutdown(wait=True)
+            if backend_loop is not None:
+                backend_loop.call_soon_threadsafe(backend_loop.stop)
+            if loop_thread is not None:
+                loop_thread.join(timeout=1)
+            if backend_loop is not None:
+                backend_loop.close()
+
     def test_no_future_returns_error(self, cmd, bot_command):
         bot_command.args = ()  # Clear any error args
         result = cmd.execute(bot_command)
@@ -410,6 +465,27 @@ class TestExecute:
 
 
 class TestRunAgent:
+    def test_honors_cancellation_requested_before_task_binding(self):
+        release = threading.Event()
+
+        class BlockingAgent:
+            async def run(self, prompt, message_history=None):
+                while not release.is_set():
+                    await asyncio.sleep(0.01)
+
+        control = _AgentRunControl()
+        control.cancel()
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = executor.submit(_run_agent, BlockingAgent(), "hello", None, None, control)
+
+            with pytest.raises(asyncio.CancelledError):
+                future.result(timeout=1)
+            assert executor.submit(lambda: "released").result(timeout=1) == "released"
+        finally:
+            release.set()
+            executor.shutdown(wait=True)
+
     def test_uses_threadsafe_submission_for_running_backend_loop(self):
         class FakeAgent:
             async def run(self, prompt, message_history=None):
