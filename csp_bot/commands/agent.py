@@ -18,7 +18,7 @@ import logging
 import os
 import threading
 from abc import abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -48,6 +48,33 @@ _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="agent-cmd")
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+class _AgentRunControl:
+    """Thread-safe cancellation bridge to an active asyncio agent run."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cancel_requested = False
+        self._cancel: Callable[[], Any] | None = None
+
+    def bind(self, cancel: Callable[[], Any]) -> None:
+        with self._lock:
+            self._cancel = cancel
+            cancel_requested = self._cancel_requested
+        if cancel_requested:
+            cancel()
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._cancel_requested = True
+            cancel = self._cancel
+        if cancel is not None:
+            cancel()
+
+    def clear(self) -> None:
+        with self._lock:
+            self._cancel = None
 
 
 @dataclass
@@ -225,6 +252,7 @@ def _run_agent(
     prompt: str | Sequence[Any],
     loop: asyncio.AbstractEventLoop | None = None,
     message_history: Sequence[Any] | None = None,
+    control: _AgentRunControl | None = None,
 ) -> Any:
     """Run an agent on an event loop (for use in thread pool).
 
@@ -239,14 +267,25 @@ def _run_agent(
     coro = agent.run(prompt, message_history=message_history)
     if loop is not None and loop.is_running():
         future = asyncio.run_coroutine_threadsafe(coro, loop)
-        return future.result()
+        if control is not None:
+            control.bind(future.cancel)
+        try:
+            return future.result()
+        finally:
+            if control is not None:
+                control.clear()
 
     owns_loop = loop is None
     if owns_loop:
         loop = asyncio.new_event_loop()
+    task = loop.create_task(coro)
+    if control is not None:
+        control.bind(lambda: loop.call_soon_threadsafe(task.cancel))
     try:
-        return loop.run_until_complete(coro)
+        return loop.run_until_complete(task)
     finally:
+        if control is not None:
+            control.clear()
         if owns_loop:
             loop.close()
 
@@ -287,6 +326,7 @@ class AgentCommand(ReplyCommand):
     _backends: ClassVar[dict[str, BackendBase]] = {}
     _backend_loops: ClassVar[dict[str, asyncio.AbstractEventLoop]] = {}
     _futures: ClassVar[dict[str, Future]] = {}
+    _run_controls: ClassVar[dict[str, _AgentRunControl]] = {}
     _sessions: ClassVar[SessionStore] = SessionStore(ttl_seconds=900.0)
 
     model_name: str = "claude-sonnet-4-6"
@@ -655,8 +695,10 @@ class AgentCommand(ReplyCommand):
 
             # Use the backend's event loop so aiohttp sessions stay valid
             backend_loop = self._backend_loops.get(command.backend)
-            future = _executor.submit(_run_agent, agent, prompt, backend_loop, history)
+            control = _AgentRunControl()
+            future = _executor.submit(_run_agent, agent, prompt, backend_loop, history, control)
             self._futures[key] = future
+            self._run_controls[key] = control
             log.info(
                 "AgentCommand[%s] submitted for user %s (session history: %d msgs)",
                 self.command(),
@@ -693,6 +735,9 @@ class AgentCommand(ReplyCommand):
             elapsed = command.times_run * self.poll_interval
             if elapsed >= self.timeout:
                 self._futures.pop(key, None)
+                control = self._run_controls.pop(key, None)
+                if control is not None:
+                    control.cancel()
                 future.cancel()
                 return Message(
                     content="Sorry, the AI request timed out. Please try again.",
@@ -732,6 +777,7 @@ class AgentCommand(ReplyCommand):
 
         # Future is done — get result
         self._futures.pop(key, None)
+        self._run_controls.pop(key, None)
         try:
             result = future.result()
             output = str(result.output) if hasattr(result, "output") else str(result)
