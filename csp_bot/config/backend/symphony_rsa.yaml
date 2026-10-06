@@ -1,0 +1,15 @@
+# @package modules.bot.config
+# Symphony authenticated with an RSA private key rather than a certificate.
+#
+# This is what `symphony-bdk` configurations use, and what Symphony's developer
+# sandbox issues, so it is offered alongside the certificate preset rather than
+# left to a hand-written override.
+symphony:
+  _target_: csp_bot.SymphonyConfig
+  bot_name: ${bot_name}
+  config:
+    _target_: chatom.symphony.SymphonyConfig
+    host: ${oc.env:SYMPHONY_HOST}
+    bot_username: ${oc.env:SYMPHONY_BOT_USERNAME}
+    # A path keeps long-lived key material out of the process environment.
+    bot_private_key_path: ${oc.env:SYMPHONY_BOT_PRIVATE_KEY_PATH}
