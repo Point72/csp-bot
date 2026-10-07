@@ -8,6 +8,7 @@ These tests cover critical integration points that have caused production bugs:
 """
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -100,7 +101,8 @@ class TestMetadataPropagation:
 
     Bug context: Commands returning Message objects directly (like trout/slap)
     were not being routed to backends because metadata["backend"] wasn't set.
-    The _filter_messages_for_backend node filters on metadata, not msg.backend.
+    _execute_command now sets it, and _filter_messages_for_backend also falls
+    back to msg.backend, so either names the destination.
     """
 
     def test_execute_command_sets_metadata_on_message(self, bot_with_symphony, sample_bot_command):
@@ -1076,3 +1078,59 @@ class TestDirectMessageDetection:
         assert channel_id == "dm123"
         assert text == "!help"
         assert mentions == []
+
+
+class TestBackendFiltering:
+    """Which field names a message's destination."""
+
+    @staticmethod
+    def _routed_to(bot, backend, message):
+        """Run the filter node on one message and report whether it passed."""
+        import csp
+
+        @csp.graph
+        def g():
+            edge = csp.unroll(csp.const([message]))
+            csp.add_graph_output("out", bot._filter_messages_for_backend(backend, edge))
+
+        result = csp.run(g, starttime=datetime.now(UTC), endtime=timedelta(seconds=1))
+        return len(result.get("out", [])) == 1
+
+    def test_metadata_routes_a_message(self, bot_with_symphony):
+        message = Message(content="hi", metadata={"backend": "symphony"})
+
+        assert self._routed_to(bot_with_symphony, "symphony", message)
+        assert not self._routed_to(bot_with_symphony, "slack", message)
+
+    def test_backend_field_routes_a_message(self, bot_with_symphony):
+        """A message sent over REST sets `backend`, not metadata.
+
+        Before this fell back to the field, such a message was accepted by the
+        send endpoint and then silently dropped, reaching no backend at all.
+        """
+        message = Message(content="hi", backend="symphony")
+
+        assert self._routed_to(bot_with_symphony, "symphony", message)
+        assert not self._routed_to(bot_with_symphony, "slack", message)
+
+    def test_metadata_wins_over_the_field(self, bot_with_symphony):
+        """Inbound tagging writes metadata, so it stays authoritative."""
+        message = Message(content="hi", backend="slack", metadata={"backend": "symphony"})
+
+        assert self._routed_to(bot_with_symphony, "symphony", message)
+        assert not self._routed_to(bot_with_symphony, "slack", message)
+
+    def test_a_message_naming_no_backend_goes_nowhere(self, bot_with_symphony):
+        message = Message(content="hi")
+
+        assert not self._routed_to(bot_with_symphony, "symphony", message)
+
+
+class TestSendChannelOptIn:
+    """messages_out is only sendable when the config asks for it."""
+
+    def test_send_is_off_by_default(self):
+        assert BotConfig().allow_send_messages is False
+
+    def test_send_can_be_enabled(self):
+        assert BotConfig(allow_send_messages=True).allow_send_messages is True

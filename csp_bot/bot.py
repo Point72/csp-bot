@@ -212,10 +212,22 @@ class Bot(GatewayModule):
         secondary_commands = csp.unroll(response_outputs.commands)
         channels.set_channel(GatewayChannels.commands, secondary_commands)
 
+        if self.config.allow_send_messages:
+            # Lets a caller POST to /api/v1/send/messages_out. The gateway wires
+            # the send adapter into the channel after every module has
+            # connected, so the merged edge below picks those messages up too.
+            channels.add_send_channel(GatewayChannels.messages_out)
+
         # Publish responses to adapters
         # chatom handles conversion to backend-specific formats
+        #
+        # Read the channel rather than the edge built above, so anything else
+        # feeding messages_out, including the send adapter, reaches a backend.
+        # This is not a cycle: subscribe() is a source and publish() a sink, so
+        # nothing here flows back into what composes the channel.
+        outbound = channels.get_channel(GatewayChannels.messages_out)
         for backend, adapter in self._adapters.items():
-            backend_messages = self._filter_messages_for_backend(backend, messages_out)
+            backend_messages = self._filter_messages_for_backend(backend, outbound)
             adapter.publish(backend_messages)
 
         # Set up presence updates for Symphony
@@ -253,10 +265,17 @@ class Bot(GatewayModule):
 
     @csp.node
     def _filter_messages_for_backend(self, backend: str, msg: ts[Message]) -> ts[Message]:
-        """Filter messages for a specific backend."""
+        """Filter messages for a specific backend.
+
+        Messages the bot routes internally are tagged in metadata, but
+        chatom's Message carries a `backend` field of its own, and that is what
+        a caller sending one over REST naturally sets. Either names the
+        destination, with metadata taking precedence since that is what the
+        inbound tagging writes.
+        """
         if csp.ticked(msg):
             metadata = msg.metadata or {}
-            msg_backend = metadata.get("backend", "")
+            msg_backend = metadata.get("backend") or msg.backend or ""
             if msg_backend == backend:
                 return msg
 
