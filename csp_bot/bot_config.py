@@ -114,3 +114,13 @@ class BotConfig(BaseModel):
         default=1.0,
         description="Minimum seconds between message outputs.",
     )
+
+    allow_send_messages: bool = Field(
+        default=False,
+        description=(
+            "Expose messages_out as a send channel, so an authenticated caller can POST a message "
+            "to /api/v1/send/messages_out and have it delivered to the backend named on the message. "
+            "Off by default: it turns the bot into a relay for anything that can reach the API, so it "
+            "should be enabled deliberately and only with authentication configured."
+        ),
+    )
