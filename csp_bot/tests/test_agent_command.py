@@ -78,6 +78,22 @@ def mock_backend():
 
 
 class TestSetBackends:
+    def test_reply_prompt_identifies_deletion_target(self, cmd, bot_command):
+        from chatom.base.message import MessageReference
+
+        bot_command.message.reference = MessageReference(message_id="accidental-bot-response")
+        prompt = cmd._build_model_prompt(bot_command, "delete that")
+        assert "accidental-bot-response" in prompt and "delete_message" in prompt
+
+    def test_reply_index_retains_older_responses_and_thread_root(self):
+        sessions = SessionStore(ttl_seconds=60)
+        session = AgentSession(user_id="U1", channel_id="C1", backend="slack", command_name="ask")
+        sessions.put(session.store_key, session)
+        for message_id in ("thread-root", "response-1", "response-2"):
+            sessions.update_response_id(session.store_key, message_id)
+        for message_id in ("thread-root", "response-1", "response-2"):
+            assert sessions.get_by_response_id(message_id, user_id="U1", channel_id="C1", backend="slack") is session
+
     def test_set_backends(self, mock_backend):
         AgentCommand.set_backends({"slack": mock_backend})
         assert AgentCommand._backends == {"slack": mock_backend}
@@ -564,12 +580,12 @@ class TestSessionStore:
         store.update_response_id("key1", "new-resp-id")
         assert store.get_by_response_id("new-resp-id", user_id="U1", channel_id="C1", backend="slack") is session
 
-    def test_update_response_id_removes_old_mapping(self):
+    def test_update_response_id_preserves_old_mapping(self):
         store = SessionStore(ttl_seconds=60.0)
         session = AgentSession(user_id="U1", channel_id="C1", backend="slack", command_name="ask", bot_response_id="old-id")
         store.put("key1", session)
         store.update_response_id("key1", "new-id")
-        assert store.get_by_response_id("old-id", user_id="U1", channel_id="C1", backend="slack") is None
+        assert store.get_by_response_id("old-id", user_id="U1", channel_id="C1", backend="slack") is session
         assert store.get_by_response_id("new-id", user_id="U1", channel_id="C1", backend="slack") is session
 
     def test_cleanup_expired(self):
@@ -923,6 +939,17 @@ class TestMultimodalPrompt:
             AgentCommand._backends = {}
 
         assert result == "plain prompt"
+
+    def test_incoming_workbook_is_exposed_to_read_file(self, cmd):
+        from chatom.base import Attachment
+
+        command = self._image_command()
+        command.message.attachments = [
+            Attachment(id="FILE1", filename="report.xlsx", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        ]
+        result = cmd._build_model_prompt(command, "read this workbook")
+        assert "FILE1" in result and "report.xlsx" in result
+        assert "msg-img" in result and "read_file" in result and "C456" in result
 
     def test_disabled_flag_returns_plain_prompt(self, cmd):
         from unittest.mock import AsyncMock

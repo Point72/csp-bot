@@ -228,6 +228,8 @@ class Bot(GatewayModule):
         outbound = channels.get_channel(GatewayChannels.messages_out)
         for backend, adapter in self._adapters.items():
             backend_messages = self._filter_messages_for_backend(backend, outbound)
+            if hasattr(adapter, "set_message_callback"):
+                adapter.set_message_callback(self._track_posted_agent_response)
             adapter.publish(backend_messages)
 
         # Set up presence updates for Symphony
@@ -360,6 +362,13 @@ class Bot(GatewayModule):
         # Also track by the response message ID if it has one
         if response.id and response.id != orig_msg_id:
             AgentCommand._sessions.update_response_id(session_key, response.id)
+
+    def _track_posted_agent_response(self, original: Message, sent: Message) -> None:
+        session_key = (original.metadata or {}).get("agent_session_key")
+        if session_key and sent.id:
+            from csp_bot.commands.agent import AgentCommand
+
+            AgentCommand._sessions.update_response_id(session_key, sent.id)
 
     def _ensure_backend_connected(self, backend: str) -> tuple[Any, asyncio.AbstractEventLoop] | None:
         """Ensure a connected backend exists for the given platform.
@@ -787,6 +796,10 @@ class Bot(GatewayModule):
             f"[{backend}] _is_message_to_bot: bot_id={bot_id}, mentions={[u.id for u in mentioned_users]}, msg.data={getattr(msg, 'data', None)}"
         )
 
+        author_id = msg.author.id if msg.author else msg.author_id
+        if author_id and author_id != bot_id and self._agent_reply_session(msg, backend, channel_id) is not None:
+            return True, channel_id, content, mentioned_users
+
         # Check if this is a DM (always to bot)
         is_dm = self._is_direct_message(msg, backend)
         log.debug(f"[{backend}] is_dm={is_dm}")
@@ -1048,37 +1061,22 @@ class Bot(GatewayModule):
             log.exception("Error extracting command")
             return None
 
-    def _check_agent_session_reply(self, msg: Message, backend: str, channel_id: str) -> BotCommand | None:
-        """Check if the message is a reply to a bot response with an active agent session.
-
-        If so, constructs a BotCommand to continue the conversation.
-        """
+    def _agent_reply_session(self, msg: Message, backend: str, channel_id: str) -> Any:
         try:
             from csp_bot.commands.agent import AgentCommand
         except ImportError:
             return None
-
-        # Get the referenced message ID
-        ref_id = None
-        if msg.reference and msg.reference.message_id:
-            ref_id = msg.reference.message_id
-        elif msg.reply_to and msg.reply_to.id:
-            ref_id = msg.reply_to.id
-        # Check thread metadata (Slack thread_ts)
-        if not ref_id and msg.thread and msg.thread.id:
-            ref_id = msg.thread.id
-
-        if not ref_id:
-            return None
-
-        # Look up session by the bot response ID
         source_id = msg.author.id if msg.author else msg.author_id or ""
-        session = AgentCommand._sessions.get_by_response_id(
-            ref_id,
-            user_id=source_id,
-            channel_id=channel_id,
-            backend=backend,
-        )
+        references = [msg.reference.message_id if msg.reference else None, msg.reply_to_id, msg.thread_id]
+        for ref_id in dict.fromkeys(reference for reference in references if reference):
+            session = AgentCommand._sessions.get_by_response_id(ref_id, user_id=source_id, channel_id=channel_id, backend=backend)
+            if session is not None:
+                return session
+        return None
+
+    def _check_agent_session_reply(self, msg: Message, backend: str, channel_id: str) -> BotCommand | None:
+        """Route a scoped reply or thread message to its active agent session."""
+        session = self._agent_reply_session(msg, backend, channel_id)
         if session is None:
             return None
 
