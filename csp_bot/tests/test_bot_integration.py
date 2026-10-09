@@ -946,6 +946,34 @@ class TestBotInfoCaching:
 
 
 class TestAgentSessionReplyIsolation:
+    def test_unmentioned_channel_reply_to_agent_is_routed(self, bot_with_symphony, monkeypatch):
+        from chatom.base import Thread
+        from chatom.base.message import MessageReference
+
+        from csp_bot.commands.agent import AgentCommand, AgentSession, SessionStore
+
+        sessions = SessionStore(ttl_seconds=60)
+        sessions.put(
+            "ask:symphony:U1:C1", AgentSession(user_id="U1", channel_id="C1", backend="symphony", command_name="ask", bot_response_id="response-1")
+        )
+        monkeypatch.setattr(AgentCommand, "_sessions", sessions)
+        bot_with_symphony._bot_user_ids["symphony"] = "BOT1"
+        bot_with_symphony._configs["symphony"] = MagicMock(bot_name="TestBot")
+        bot_with_symphony._bot_names["symphony"] = "TestBot"
+        bot_with_symphony._commands["ask"] = MagicMock(preexecute=lambda command: command)
+        message = Message(
+            id="reply-1",
+            content="delete that accidental response",
+            author=User(id="U1"),
+            channel=Channel(id="C1"),
+            reference=MessageReference(message_id="response-1"),
+            thread=Thread(id="response-1"),
+        )
+        accepted, channel, _, _ = bot_with_symphony._is_message_to_bot(message, "symphony")
+        assert accepted and channel == "C1"
+        routed = bot_with_symphony._extract_commands(message, "symphony", "C1", message.content, [])
+        assert routed.command == "ask" and routed.args == ("delete that accidental response",)
+
     def test_reply_from_different_user_does_not_resume_session(self, bot_with_symphony, monkeypatch):
         from chatom.base.message import MessageReference
 

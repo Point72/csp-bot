@@ -50,6 +50,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mcp = [
+    "chatom[agent]>=0.2.0",
+    "pydantic-ai>=2.54",
+]
 agent = [
     "chatom[agent]>=0.2.0",
     "pydantic-ai>=2.42",
