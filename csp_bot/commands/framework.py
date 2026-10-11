@@ -31,7 +31,7 @@ _COMMAND_REGISTRY: dict[str, CommandEntry] = {}
 class CommandEntry:
     """Internal registry entry for a command."""
 
-    __slots__ = ("backends", "handler", "help", "is_class", "name")
+    __slots__ = ("backends", "handler", "help", "is_class", "name", "usage")
 
     def __init__(
         self,
@@ -40,18 +40,22 @@ class CommandEntry:
         handler: Any,
         backends: list[str] | None = None,
         is_class: bool = False,
+        usage: str = "",
     ):
         self.name = name
         self.help = help
         self.handler = handler
         self.backends = backends or []
         self.is_class = is_class
+        self.usage = usage
 
 
 def command(
     name: str,
     help: str = "",
     backends: list[str] | None = None,
+    *,
+    usage: str = "",
 ) -> Callable:
     """Decorator to register a function as a bot command.
 
@@ -67,6 +71,7 @@ def command(
         name: The command name (e.g. "echo" for /echo).
         help: Help text shown by the /help command.
         backends: List of backends this command supports. Empty = all.
+        usage: Optional command syntax, without a label.
 
     Returns:
         The original function, registered in the global command registry.
@@ -85,12 +90,14 @@ def command(
             handler=fn,
             backends=backends,
             is_class=False,
+            usage=usage,
         )
         _COMMAND_REGISTRY[name] = entry
         # Stash metadata on the function for introspection
         fn._command_name = name
         fn._command_help = help
         fn._command_backends = backends or []
+        fn._command_usage = usage
         return fn
 
     return decorator
@@ -132,6 +139,9 @@ class Command(BaseModel):
 
     help: str = ""
     """Help text shown by the /help command."""
+
+    usage: str = ""
+    """Optional command syntax, without a label."""
 
     backends: list[str] = Field(default_factory=list)
     """Backends this command supports. Empty = all."""

@@ -29,8 +29,14 @@ def _command_name(runner: Any) -> str:
 
 def _command_help(runner: Any) -> str:
     if isinstance(runner, BaseCommand):
-        return runner.help()
-    return getattr(runner, "help", "") or ""
+        description = runner.help()
+        usage = runner.usage()
+    else:
+        description = getattr(runner, "help", "") or ""
+        usage = getattr(runner, "usage", "") or ""
+    if not usage:
+        return description
+    return f"{description} Syntax: {usage}" if description else f"Syntax: {usage}"
 
 
 def _render_table_help(rows: list, backend: str) -> str:
