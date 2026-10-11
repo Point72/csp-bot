@@ -47,6 +47,10 @@ class LegacyCommandAdapter:
         return self._command.help()
 
     @property
+    def usage(self) -> str:
+        return self._command.usage()
+
+    @property
     def backends(self) -> list[str]:
         return self._command.backends()
 

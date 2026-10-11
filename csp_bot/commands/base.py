@@ -46,6 +46,10 @@ class BaseCommand(ABC):
         """Return the help text for the command."""
         ...
 
+    def usage(self) -> str:
+        """Return optional command syntax, without a label."""
+        return ""
+
     @abstractmethod
     def num_recipients(self) -> int:
         """Return how many users this command can tag.
