@@ -381,6 +381,9 @@ class AgentCommand(ReplyCommand):
         model_name = kwargs.pop("model_name", None)
         if model_name is not None:
             self.model_name = model_name
+        root_prompt = kwargs.pop("root_prompt", None)
+        if root_prompt is not None:
+            self.root_prompt = root_prompt
         self.mcp_servers = [MCPServerConfig.model_validate(config) for config in kwargs.pop("mcp_servers", [])]
 
     @classmethod
@@ -886,7 +889,8 @@ class AgentCommandModel(BaseCommandModel):
     command: type[AgentCommand]
     model_name: str = "claude-sonnet-4-6"
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
+    root_prompt: str | None = None
 
     def create_command(self) -> AgentCommand:
         """Create the configured agent command."""
-        return self.command(model_name=self.model_name, mcp_servers=self.mcp_servers)
+        return self.command(model_name=self.model_name, mcp_servers=self.mcp_servers, root_prompt=self.root_prompt)
