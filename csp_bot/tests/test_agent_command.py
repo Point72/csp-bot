@@ -180,6 +180,36 @@ class TestGetModel:
 
 
 class TestAgentCommandModel:
+    def test_creates_command_with_configured_root_prompt(self, bot_command):
+        model = AgentCommandModel(command=ConcreteAgentCommand, root_prompt="Use the project handbook for project questions.")
+
+        command = model.create_command()
+
+        assert model.root_prompt is not None
+        assert command.root_prompt == model.root_prompt
+        assert command.build_root_prompt(bot_command) == model.root_prompt
+        assert command._prompt_prefix(bot_command).startswith(model.root_prompt)
+
+    @pytest.mark.parametrize(
+        "configured,expected",
+        [(None, "Default project context."), ("", ""), ("Custom project context.", "Custom project context.")],
+    )
+    def test_root_prompt_preserves_defaults_or_uses_explicit_override(self, configured, expected):
+        class DefaultPromptCommand(ConcreteAgentCommand):
+            root_prompt = "Default project context."
+
+        model = AgentCommandModel(command=DefaultPromptCommand, root_prompt=configured)
+
+        assert model.create_command().root_prompt == expected
+        assert DefaultPromptCommand.root_prompt == "Default project context."
+
+    def test_root_prompt_is_instance_specific(self):
+        command = ConcreteAgentCommand(root_prompt="Custom project context.")
+
+        assert command.root_prompt == "Custom project context."
+        assert ConcreteAgentCommand().root_prompt == ""
+        assert ConcreteAgentCommand.root_prompt == ""
+
     def test_creates_command_with_configured_model_name(self):
         model = AgentCommandModel(command=ConcreteAgentCommand, model_name="github-copilot:test-model")
 
