@@ -75,7 +75,10 @@ class ScheduleCommand(ReplyCommand):
                     remove.append(i)
                     if i + 1 < len(args):
                         try:
-                            schedule_string = args[i + 1].replace("-", " ")
+                            schedule_string = args[i + 1].strip()
+                            # Only expand separators in the legacy single-token form.
+                            if len(schedule_string.split()) == 1:
+                                schedule_string = schedule_string.replace("-", " ")
                             croniter(schedule_string)
                             command.schedule = schedule_string
                             remove.append(i + 1)
