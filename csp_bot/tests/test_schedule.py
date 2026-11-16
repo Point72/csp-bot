@@ -2,7 +2,9 @@
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from chatom import Message, User
+from croniter import croniter
 
 from csp_bot import Bot, BotConfig
 from csp_bot.commands.schedule import ScheduleCommand
@@ -51,6 +53,30 @@ def test_schedule_remove_uses_stable_schedule_id():
 
     assert result is None
     assert schedule_store.get("schedule-1") is None
+
+
+@pytest.mark.parametrize(
+    ("cron_arg", "expression", "next_run"),
+    [
+        ('"0 9 * * MON-FRI"', "0 9 * * MON-FRI", datetime(2026, 11, 16, 9, tzinfo=UTC)),
+        ('"0 9-17 * * *"', "0 9-17 * * *", datetime(2026, 11, 14, 9, tzinfo=UTC)),
+        ('"0 9 * * *"', "0 9 * * *", datetime(2026, 11, 14, 9, tzinfo=UTC)),
+        ("0-9-*-*-*", "0 9 * * *", datetime(2026, 11, 14, 9, tzinfo=UTC)),
+    ],
+)
+def test_schedule_add_preserves_cron_ranges(cron_arg, expression, next_run):
+    bot = Bot(config=BotConfig())
+    bot._commands["schedule"] = ScheduleCommand()
+    text = f"/schedule add /schedule {cron_arg} /echo hello"
+    message = Message(id="schedule-add", content=text)
+
+    command = bot._extract_commands(message, "slack", "C456", text, [])
+
+    assert isinstance(command, BotCommand)
+    assert command.schedule == expression
+    assert command.command == "echo"
+    assert command.args == ("hello",)
+    assert croniter(command.schedule, datetime(2026, 11, 13, 17, 30, tzinfo=UTC)).get_next(datetime) == next_run
 
 
 def test_bot_store_scheduled_command_allows_duplicate_command_names():
