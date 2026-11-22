@@ -28,6 +28,9 @@ gateway:
     - /commands/echo
     - /commands/schedule
     - /commands/status
+    - /commands/whoami
+    - /commands/logs
+    - /commands/messages
   settings:
     PORT: ${port}
 

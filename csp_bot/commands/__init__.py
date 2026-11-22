@@ -29,6 +29,7 @@ from .executor import execute_command_func
 from .framework import Command, CommandEntry, CommandModel, clear_registry, command, get_registered_commands
 from .help import HelpCommand, HelpCommandModel
 from .legacy import LegacyCommandAdapter
+from .management import LogsCommand, LogsCommandModel, MessagesCommand, MessagesCommandModel, WhoamiCommand, WhoamiCommandModel
 from .schedule import ScheduleCommand, ScheduleCommandModel
 from .status import StatusCommand, StatusCommandModel
 
@@ -45,6 +46,10 @@ __all__ = (
     "HelpCommand",
     "HelpCommandModel",
     "LegacyCommandAdapter",
+    "LogsCommand",
+    "LogsCommandModel",
+    "MessagesCommand",
+    "MessagesCommandModel",
     "NoResponseCommand",
     "ReplyCommand",
     "ReplyToAllCommand",
@@ -54,6 +59,8 @@ __all__ = (
     "ScheduleCommandModel",
     "StatusCommand",
     "StatusCommandModel",
+    "WhoamiCommand",
+    "WhoamiCommandModel",
     "clear_registry",
     "command",
     "execute_command_func",

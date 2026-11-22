@@ -18,6 +18,7 @@ import threading
 import time
 from csv import reader
 from datetime import datetime, timedelta
+from functools import partial
 from io import StringIO
 from logging import getLogger
 from types import MappingProxyType
@@ -49,8 +50,10 @@ from .commands import (
     execute_command_func,
     get_registered_commands,
 )
+from .commands.management import AdminCommand, ManagementCommand
 from .gateway import GatewayChannels, GatewayModule
 from .persistence import InMemoryStateStore, ScheduledCommandRecord, ScheduleStore, StateStore
+from .sent_messages import SentMessageStore
 from .structs import (
     Backend,
     BotCommand,
@@ -84,6 +87,7 @@ class Bot(GatewayModule):
     _adapters: dict[Backend, Any] = PrivateAttr(default_factory=dict)
     _connected_backends: dict[Backend, tuple[Any, asyncio.AbstractEventLoop]] = PrivateAttr(default_factory=dict)
     _schedule_store: ScheduleStore = PrivateAttr(default_factory=lambda: ScheduleStore(InMemoryStateStore()))
+    _sent_messages: SentMessageStore = PrivateAttr(default_factory=SentMessageStore)
     _authorized_users: dict[Backend, set[str]] = PrivateAttr(default_factory=dict)
     _bot_user_ids: dict[Backend, str] = PrivateAttr(default_factory=dict)
     _bot_names: dict[Backend, str] = PrivateAttr(default_factory=dict)
@@ -108,6 +112,7 @@ class Bot(GatewayModule):
     def set_state_store(self, state_store: StateStore) -> None:
         """Inject the state store used for bot runtime persistence."""
         self.set_schedule_store(ScheduleStore(state_store))
+        self._sent_messages = SentMessageStore(state_store)
 
     def set_schedule_store(self, schedule_store: ScheduleStore) -> None:
         """Inject a schedule store for delayed and recurring commands."""
@@ -131,6 +136,9 @@ class Bot(GatewayModule):
     def set_deps(self, deps: Any) -> None:
         """Set shared dependency object for new command framework contexts."""
         self._deps = deps
+
+    def is_management_admin(self, backend: str, user_id: str) -> bool:
+        return self.config.management.is_admin(backend, user_id)
 
     def connect(self, channels: GatewayChannels) -> None:
         """Connect to configured backends and set up message processing.
@@ -229,7 +237,7 @@ class Bot(GatewayModule):
         for backend, adapter in self._adapters.items():
             backend_messages = self._filter_messages_for_backend(backend, outbound)
             if hasattr(adapter, "set_message_callback"):
-                adapter.set_message_callback(self._track_posted_agent_response)
+                adapter.set_message_callback(partial(self._record_sent_message, backend))
             adapter.publish(backend_messages)
 
         # Set up presence updates for Symphony
@@ -370,6 +378,13 @@ class Bot(GatewayModule):
 
             AgentCommand._sessions.update_response_id(session_key, sent.id)
 
+    def _record_sent_message(self, backend: str, original: Message, sent: Message) -> None:
+        try:
+            self._sent_messages.record(backend, original, sent)
+        except Exception:
+            log.exception("Cannot record successfully sent message backend=%s message=%s", backend, sent.id)
+        self._track_posted_agent_response(original, sent)
+
     def _ensure_backend_connected(self, backend: str) -> tuple[Any, asyncio.AbstractEventLoop] | None:
         """Ensure a connected backend exists for the given platform.
 
@@ -459,6 +474,10 @@ class Bot(GatewayModule):
         Supports both legacy BaseCommandModel and the new CommandModel.
         """
         log.info(f"Loading {len(command_models)} commands...")
+        try:
+            from .commands.agent import AgentCommand
+        except ImportError:
+            AgentCommand = None
         self._load_entrypoint_commands()
         active_backends = self._active_backends()
         for model in command_models:
@@ -476,6 +495,12 @@ class Bot(GatewayModule):
                 runner = command
             else:
                 raise TypeError(f"Unsupported command type from model {type(model).__name__}: {type(command).__name__}")
+
+            if isinstance(command, ManagementCommand):
+                command._bot = self
+            if AgentCommand is not None and isinstance(command, AgentCommand):
+                command._admin_authorizer = self.is_management_admin
+                command._message_callback = self._record_sent_message
 
             if not self._is_command_backend_compatible(command_str, runner, active_backends):
                 continue
@@ -973,7 +998,9 @@ class Bot(GatewayModule):
                 return self._create_help_command(msg, backend, channel_id)
 
             # Tokenize the command
-            tokens = next(reader(StringIO(content), delimiter=" ", quotechar='"', skipinitialspace=True))
+            raw_tokens = content.split(maxsplit=1)
+            raw_args = getattr(self._commands.get(raw_tokens[0].lstrip("/!").lower()), "raw_args", False)
+            tokens = raw_tokens if raw_args else next(reader(StringIO(content), delimiter=" ", quotechar='"', skipinitialspace=True))
             if not tokens:
                 return None
 
@@ -989,7 +1016,10 @@ class Bot(GatewayModule):
             filtered_mentions = [u for u in mentions if u.id != bot_id]
 
             # Parse arguments and tagged users
-            args, target_users, target_channel = self._parse_command_args(tokens[1:], filtered_mentions, backend)
+            if raw_args:
+                args, target_users, target_channel = tokens[1:], [], ""
+            else:
+                args, target_users, target_channel = self._parse_command_args(tokens[1:], filtered_mentions, backend)
 
             # Resolve channel name to ID if a target channel was specified
             target_channel_name = ""
@@ -1051,6 +1081,8 @@ class Bot(GatewayModule):
             )
 
             # Pre-execute hooks
+            if isinstance(command_runner, AdminCommand) and (not self.is_management_admin(backend, source.id) or target_channel != channel_id):
+                return bot_cmd
             if isinstance(command_runner, ScheduleCommand):
                 return command_runner.preexecute(bot_cmd, self._schedule_store, self)
             elif isinstance(command_runner, StatusCommand):
@@ -1229,6 +1261,23 @@ class Bot(GatewayModule):
         command_runner = self._commands.get(cmd.command)
         if not command_runner:
             return None
+
+        if isinstance(command_runner, AdminCommand):
+            origin = cmd.message.channel_id if cmd.message and cmd.message.channel_id else cmd.channel_id
+            if not self.is_management_admin(cmd.backend, cmd.source.id):
+                log.warning("Management access denied command=%s backend=%s user=%s", cmd.command, cmd.backend, cmd.source.id)
+                return [Message(content="Admin access required.", channel=Channel(id=origin), backend=cmd.backend, metadata={"backend": cmd.backend})]
+            if cmd.channel_id != origin:
+                log.warning("Management redirect denied command=%s backend=%s user=%s", cmd.command, cmd.backend, cmd.source.id)
+                return [
+                    Message(
+                        content="Management commands cannot redirect to another channel.",
+                        channel=Channel(id=origin),
+                        backend=cmd.backend,
+                        metadata={"backend": cmd.backend},
+                    )
+                ]
+            log.info("Management action command=%s backend=%s user=%s channel=%s", cmd.command, cmd.backend, cmd.source.id, origin)
 
         try:
             if isinstance(command_runner, BaseCommand):

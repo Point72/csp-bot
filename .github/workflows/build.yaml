@@ -41,6 +41,9 @@ jobs:
       - name: Install dependencies
         run: make develop
 
+      - name: Install sent-message callback support
+        run: uv pip install "chatom[agent,csp] @ git+https://github.com/1kbgz/chatom.git@aa0af26c9a9c5d683d201d7f21747581a860aa42"
+
       - name: Lint
         run: make lint
 

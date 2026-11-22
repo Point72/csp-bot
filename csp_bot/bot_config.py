@@ -18,6 +18,7 @@ __all__ = (
     "BackendConfig",
     "BotConfig",
     "DiscordConfig",
+    "ManagementConfig",
     "SlackConfig",
     "SymphonyConfig",
     "TelegramConfig",
@@ -98,6 +99,20 @@ class TelegramConfig(BackendConfig):
     )
 
 
+class ManagementConfig(BaseModel):
+    """Explicit backend-scoped administrators and log access."""
+
+    admin_users: dict[str, set[str]] = Field(default_factory=dict, description="Backend name to administrator user IDs. Empty denies access.")
+    log_channels: dict[str, set[str]] = Field(default_factory=dict, description="Backend name to channel IDs permitted to receive logs.")
+    message_channels: dict[str, set[str]] = Field(
+        default_factory=dict, description="Backend name to channels permitted for cross-room message management."
+    )
+    log_file: str | None = Field(default=None, description="Operator-configured bot log file. None disables log retrieval.")
+
+    def is_admin(self, backend: str, user_id: str) -> bool:
+        return bool(user_id) and user_id in self.admin_users.get(backend, set())
+
+
 class BotConfig(BaseModel):
     """Main bot configuration.
 
@@ -109,6 +124,7 @@ class BotConfig(BaseModel):
     slack: SlackConfig | None = None
     symphony: SymphonyConfig | None = None
     telegram: TelegramConfig | None = None
+    management: ManagementConfig = Field(default_factory=ManagementConfig)
 
     ratelimit_seconds: float = Field(
         default=1.0,

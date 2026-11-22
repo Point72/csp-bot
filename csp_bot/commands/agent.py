@@ -22,6 +22,7 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any, ClassVar
 
 from chatom import Channel, Message
@@ -385,6 +386,8 @@ class AgentCommand(ReplyCommand):
         if root_prompt is not None:
             self.root_prompt = root_prompt
         self.mcp_servers = [MCPServerConfig.model_validate(config) for config in kwargs.pop("mcp_servers", [])]
+        self._admin_authorizer: Callable[[str, str], bool] = lambda _backend, _user_id: False
+        self._message_callback: Callable[[str, Message, Message], None] | None = None
 
     @classmethod
     def set_backends(
@@ -453,6 +456,8 @@ class AgentCommand(ReplyCommand):
         return BackendToolset(
             backend=backend,
             access_policy=policy,
+            disabled_tools=set() if self._admin_authorizer(command.backend, command.source.id) else {"delete_message"},
+            on_sent=partial(self._message_callback, command.backend) if self._message_callback is not None else None,
             max_tool_calls=self.max_tool_calls,
             per_tool_limits=self.per_tool_limits,
         )
