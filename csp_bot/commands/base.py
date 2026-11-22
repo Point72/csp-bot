@@ -20,6 +20,9 @@ class BaseCommand(ABC):
     their behavior and response type.
     """
 
+    raw_args: bool = False
+    """Receive the argument text as one token, preserving quotes and internal whitespace."""
+
     @staticmethod
     @abstractmethod
     def kind() -> CommandVariant:

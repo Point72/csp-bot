@@ -9,3 +9,12 @@ schedule:
 
 status:
   _target_: csp_bot.commands.StatusCommandModel
+
+whoami:
+  _target_: csp_bot.commands.WhoamiCommandModel
+
+logs:
+  _target_: csp_bot.commands.LogsCommandModel
+
+messages:
+  _target_: csp_bot.commands.MessagesCommandModel
