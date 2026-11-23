@@ -70,6 +70,20 @@ Management administrators are configured by backend and user ID. Display names
 and membership in a log channel do not grant admin access. Empty admin lists
 deny management access. `/whoami` supplies the IDs needed for configuration.
 
+Any command can be made admin-only by setting `admin: true` on its command
+model. Admin-only commands follow the same rules as `/logs` and `/messages`:
+only admins can run them, they reject reply-destination redirects, and `/help`
+lists them only for admins. `admin: false` lifts the restriction from `/logs` or
+`/messages`, though they still require a configured channel.
+
+```yaml
+gateway:
+  commands:
+    - /commands/help
+    - _target_: csp_bot.commands.ScheduleCommandModel
+      admin: true
+```
+
 With a packaged gateway configuration, management settings belong under
 `modules.bot.config`:
 

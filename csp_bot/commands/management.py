@@ -29,7 +29,9 @@ class ManagementCommand(ReplyCommand):
 
 
 class AdminCommand(ManagementCommand):
-    """Marker for commands requiring a configured management administrator."""
+    """Management command that only a configured management administrator may run."""
+
+    admin = True
 
 
 class WhoamiCommand(ManagementCommand):

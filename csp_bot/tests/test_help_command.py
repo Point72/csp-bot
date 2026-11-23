@@ -113,3 +113,20 @@ def test_help_renders_usage_without_description():
     runner = Command(name="Echo", usage="/echo message")
     result = HelpCommand().execute(_command("discord"), {"echo": runner})
     assert result.content.endswith("- `/echo` **Echo**: Syntax: /echo message")
+
+
+@pytest.mark.parametrize(("user_id", "listed"), [("user1", False), ("admin1", True)])
+def test_help_lists_admin_commands_only_for_admins(user_id, listed):
+    from csp_bot.commands.management import LogsCommand
+
+    command = _command("slack").model_copy(update={"source": User(id=user_id)})
+
+    response = HelpCommand().execute(
+        command,
+        {**_commands(), "logs": LogsCommand()},
+        is_admin=lambda backend, user: backend == "slack" and user == "admin1",
+    )
+
+    assert response is not None
+    assert ("/logs" in response.content) is listed
+    assert "/ask" in response.content

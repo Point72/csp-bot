@@ -7,6 +7,9 @@ from chatom.base.capabilities import BackendCapabilities, Capability
 
 from csp_bot import Bot, BotCommand, BotConfig
 from csp_bot.bot_config import ManagementConfig
+from csp_bot.commands.echo import EchoCommandModel
+from csp_bot.commands.framework import Command, CommandModel
+from csp_bot.commands.help import HelpCommandModel
 from csp_bot.commands.management import LogsCommandModel, MessagesCommandModel, WhoamiCommandModel
 
 
@@ -294,3 +297,37 @@ def test_agent_deletion_uses_management_admins(bot, backend, user, available):
         with pytest.raises(ValueError, match="not available"):
             asyncio.run(toolset.call("delete_message", {"channel": {"id": "control"}, "message_id": "target"}))
         backend.delete_message.assert_not_awaited()
+
+
+def _bot_with(bot, models):
+    instance = Bot(config=bot.config)
+    instance.load_commands(models)
+    return instance
+
+
+def test_config_can_make_any_command_admin_only(bot):
+    flagged = _bot_with(bot, [EchoCommandModel(admin=True)])
+    assert "Admin access required" in _content(flagged, _command("echo", ("hi",), user="member"))
+    assert "Admin access required" not in _content(flagged, _command("echo", ("hi",)))
+
+
+def test_config_can_open_an_admin_command(bot):
+    opened = _bot_with(bot, [LogsCommandModel(admin=False)])
+    assert "Admin access required" not in _content(opened, _command("logs", user="member"))
+
+
+def test_help_lists_admin_only_commands_to_admins(bot):
+    flagged = _bot_with(bot, [HelpCommandModel(), EchoCommandModel(admin=True)])
+    assert "/echo" not in _content(flagged, _command("help", user="member"))
+    assert "/echo" in _content(flagged, _command("help"))
+
+
+def test_config_can_make_a_framework_command_admin_only(bot):
+    class Greet(Command):
+        name: str = "greet"
+
+        def execute(self, ctx):
+            return "hi"
+
+    flagged = _bot_with(bot, [CommandModel(command=Greet, admin=True)])
+    assert "Admin access required" in _content(flagged, _command("greet", user="member"))

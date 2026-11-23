@@ -1,6 +1,6 @@
 """Help command for csp-bot."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from logging import getLogger
 from typing import Any
 
@@ -93,6 +93,7 @@ class HelpCommand(ReplyCommand):
         self,
         command: BotCommand,
         commands: Mapping[str, Any] | None = None,
+        is_admin: Callable[[str, str], bool] | None = None,
     ) -> Message | None:
         log.info(f"Help command: {command.command}")
 
@@ -107,6 +108,10 @@ class HelpCommand(ReplyCommand):
                 continue
 
             if command.args and cmd_key not in command.args:
+                continue
+
+            # Admin commands are listed only for the admins allowed to run them.
+            if getattr(cmd_inst, "admin", False) and not (is_admin and is_admin(command.backend, command.source.id)):
                 continue
 
             rows.append(
