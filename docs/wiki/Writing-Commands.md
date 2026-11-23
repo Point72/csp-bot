@@ -75,6 +75,7 @@ gateway:
 ```
 
 `gateway.commands` replaces the default command list, so include the built-ins you want to keep.
+To limit a command to management admins, set `admin = True` on the command class, or `admin: true` on its entry in the config.
 Then start the bot, adding the config directory to both Hydra's search path and Python's import path:
 
 ```bash

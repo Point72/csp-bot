@@ -146,6 +146,9 @@ class Command(BaseModel):
     backends: list[str] = Field(default_factory=list)
     """Backends this command supports. Empty = all."""
 
+    admin: bool = False
+    """Only management admins may run the command, and only they see it in /help."""
+
     def execute(self, ctx: CommandContext) -> Any:
         """Execute the command. Override in subclasses.
 
@@ -168,6 +171,8 @@ class CommandModel(BaseModel):
     """
 
     command: type[Command] = Command
+    admin: bool | None = None
+    """Override the command's ``admin`` flag. None keeps the command's own default."""
 
     def create_command(self) -> Command:
         """Create the configured command."""

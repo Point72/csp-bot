@@ -23,6 +23,9 @@ class BaseCommand(ABC):
     raw_args: bool = False
     """Receive the argument text as one token, preserving quotes and internal whitespace."""
 
+    admin: bool = False
+    """Only management admins may run the command, and only they see it in /help."""
+
     @staticmethod
     @abstractmethod
     def kind() -> CommandVariant:
@@ -143,6 +146,8 @@ class BaseCommandModel(BaseModel):
     """Model for registering commands via configuration."""
 
     command: type[BaseCommand]
+    admin: bool | None = None
+    """Override the command's ``admin`` flag. None keeps the command's own default."""
 
     def create_command(self) -> BaseCommand:
         """Create the configured command."""

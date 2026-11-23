@@ -54,7 +54,7 @@ from .commands import (
     execute_command_func,
     get_registered_commands,
 )
-from .commands.management import AdminCommand, ManagementCommand
+from .commands.management import ManagementCommand
 from .gateway import GatewayChannels, GatewayModule
 from .persistence import InMemoryStateStore, ScheduledCommandRecord, ScheduleStore, StateStore
 from .sent_messages import SentMessageStore
@@ -514,6 +514,9 @@ class Bot(GatewayModule):
             else:
                 raise TypeError(f"Unsupported command type from model {type(model).__name__}: {type(command).__name__}")
 
+            admin = getattr(model, "admin", None)
+            if admin is not None:
+                command.admin = admin
             if isinstance(command, ManagementCommand):
                 command._bot = self
             if AgentCommand is not None and isinstance(command, AgentCommand):
@@ -1112,7 +1115,7 @@ class Bot(GatewayModule):
             )
 
             # Pre-execute hooks
-            if isinstance(command_runner, AdminCommand) and (not self.is_management_admin(backend, source.id) or target_channel != channel_id):
+            if getattr(command_runner, "admin", False) and (not self.is_management_admin(backend, source.id) or target_channel != channel_id):
                 return bot_cmd
             if isinstance(command_runner, ScheduleCommand):
                 return command_runner.preexecute(bot_cmd, self._schedule_store, self)
@@ -1293,7 +1296,7 @@ class Bot(GatewayModule):
         if not command_runner:
             return None
 
-        if isinstance(command_runner, AdminCommand):
+        if getattr(command_runner, "admin", False):
             origin = cmd.message.channel_id if cmd.message and cmd.message.channel_id else cmd.channel_id
             if not self.is_management_admin(cmd.backend, cmd.source.id):
                 log.warning("Management access denied command=%s backend=%s user=%s", cmd.command, cmd.backend, cmd.source.id)
@@ -1313,7 +1316,7 @@ class Bot(GatewayModule):
         try:
             if isinstance(command_runner, BaseCommand):
                 if isinstance(command_runner, HelpCommand):
-                    responses = command_runner.execute(cmd, MappingProxyType(self._commands))
+                    responses = command_runner.execute(cmd, MappingProxyType(self._commands), self.is_management_admin)
                 elif isinstance(command_runner, ScheduleCommand):
                     responses = command_runner.execute(cmd, self._schedule_store)
                 else:
