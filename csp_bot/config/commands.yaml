@@ -7,6 +7,9 @@ echo:
 schedule:
   _target_: csp_bot.commands.ScheduleCommandModel
 
+delay:
+  _target_: csp_bot.commands.DelayCommandModel
+
 status:
   _target_: csp_bot.commands.StatusCommandModel
 

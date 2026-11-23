@@ -30,7 +30,7 @@ from .framework import Command, CommandEntry, CommandModel, clear_registry, comm
 from .help import HelpCommand, HelpCommandModel
 from .legacy import LegacyCommandAdapter
 from .management import LogsCommand, LogsCommandModel, MessagesCommand, MessagesCommandModel, WhoamiCommand, WhoamiCommandModel
-from .schedule import ScheduleCommand, ScheduleCommandModel
+from .schedule import DelayCommand, DelayCommandModel, ScheduleCommand, ScheduleCommandModel
 from .status import StatusCommand, StatusCommandModel
 
 __all__ = (
@@ -41,6 +41,8 @@ __all__ = (
     "CommandContext",
     "CommandEntry",
     "CommandModel",
+    "DelayCommand",
+    "DelayCommandModel",
     "EchoCommand",
     "EchoCommandModel",
     "HelpCommand",

@@ -144,7 +144,7 @@ class BotCommand(GatewayStruct):
     message: ChatomMessage
     """The original chatom Message."""
 
-    delay: datetime
+    delay: datetime | None
     """Scheduled execution time (for delayed commands)."""
 
     schedule: str
@@ -152,6 +152,15 @@ class BotCommand(GatewayStruct):
 
     schedule_id: str = ""
     """Stable ID for delayed or scheduled command records."""
+
+    prepare_on_run: bool = False
+    """Defer the inner command's preparation until its scheduled occurrence."""
+
+    burst_checked: bool = False
+    """Preparation already reserved this invocation's burst-limit slot."""
+
+    execution_error: str | None = None
+    """A blocked invocation's error; an empty string suppresses repeated reports."""
 
     times_run: int
     """Number of times this command has run."""

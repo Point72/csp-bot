@@ -43,7 +43,6 @@ dependencies = [
     "croniter",
     "csp>=0.9,<1",
     "csp-gateway>=2.5,<4",
-    "dateparser",
     "hydra-core",
     "pandas",
     "pydantic>=2",

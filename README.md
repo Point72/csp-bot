@@ -54,6 +54,54 @@ Install with `conda`
 conda install csp csp-bot -c conda-forge
 ```
 
+## Scheduling commands
+
+Scheduling options precede a standalone `--`; the text after it is the command
+to run. Cron expressions have five fields and use UTC. Delays accept a positive
+number with `ms`, `s`, `m`, `h`, or `d` units.
+
+```text
+/schedule add --cron "0 9 * * 1-5" -- /echo Morning update
+/delay 20m -- /help schedule
+/schedule list
+/schedule remove <id>
+```
+
+Creation returns an ID and the next execution time. The inner command, including
+its preparation hooks, runs when due. Tokens such as `/schedule` or `/delay`
+after the boundary belong to the inner command. Quotes and raw JSON arguments
+use that command's normal parser. Missing boundaries, invalid timing, unknown
+commands, and nested scheduling commands return an error without creating a job
+or executing the inner command. Legacy inline timing flags and hyphen-separated
+cron fields are rejected; cron ranges such as `1-5` remain valid.
+
+Users can list/remove their own schedules on the current backend. Configured
+backend admins can also list/remove other users' schedules. Removing a schedule
+prevents subsequent occurrences even if an alarm is already armed. Removing a
+recurring schedule does not cancel an occurrence that has already started.
+
+Existing state stores persist schedules. On restart, future one-off jobs are
+re-armed, overdue one-off jobs are removed, and overdue recurring jobs advance
+to their next future occurrence. Missed occurrences are not replayed. Each
+recurring run has a separate invocation ID so its async polling does not overwrite
+the recurring schedule or another run.
+
+### Repeated-command gate
+
+At most three matching executions are allowed in a rolling five-second window.
+The fourth is stopped before preparation/execution. Matching includes backend,
+user ID, destination channel, command name, arguments, and mentioned-user IDs.
+Preparation and execution count once together; queued continuations and async
+polls are also checked. The default two-second agent polling interval fits
+within this limit.
+
+A blocked burst reports one error, removes matching schedules and delayed work,
+and cancels matching in-flight agents. Pending alarms for removed jobs cannot
+restart them. Further blocked attempts are silent until another execution is
+allowed by the window. Other users, rooms, and arguments have separate budgets.
+The gate is in memory per running bot; removed schedules remain removed in a
+configured persistent state store.
+
 ## Management commands
 
 The default configuration includes `/whoami`, `/logs`, and `/messages`.

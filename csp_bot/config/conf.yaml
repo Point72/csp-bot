@@ -27,6 +27,7 @@ gateway:
     - /commands/help
     - /commands/echo
     - /commands/schedule
+    - /commands/delay
     - /commands/status
     - /commands/whoami
     - /commands/logs

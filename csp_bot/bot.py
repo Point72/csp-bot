@@ -16,13 +16,15 @@ import importlib.metadata as importlib_metadata
 import re
 import threading
 import time
+from collections import deque
 from csv import reader
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from io import StringIO
 from logging import getLogger
 from types import MappingProxyType
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
+from uuid import uuid4
 
 import csp
 from chatom import Channel, Message, User, mention_user_for_backend
@@ -95,6 +97,8 @@ class Bot(GatewayModule):
     _authorized_users: dict[Backend, set[str]] = PrivateAttr(default_factory=dict)
     _bot_user_ids: dict[Backend, str] = PrivateAttr(default_factory=dict)
     _bot_names: dict[Backend, str] = PrivateAttr(default_factory=dict)
+    _recent_commands: dict[tuple, deque[datetime]] = PrivateAttr(default_factory=dict)
+    _burst_notified: set[tuple] = PrivateAttr(default_factory=set)
     _deps: Any = PrivateAttr(default=None)
     _thread: threading.Thread | None = PrivateAttr(None)
     _lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
@@ -129,6 +133,11 @@ class Bot(GatewayModule):
             next_run_at = self._datetime_for_now(record.next_run_at, now)
             if next_run_at and next_run_at >= now:
                 restored.append(record)
+            elif record.command.schedule:
+                next_run_at = croniter(record.command.schedule, now).get_next(datetime)
+                restored.append(self._store_scheduled_command(record.command, next_run_at))
+            else:
+                self._remove_scheduled_command(record.schedule_id)
         return restored
 
     def _store_scheduled_command(self, cmd: BotCommand, next_run_at: datetime) -> ScheduledCommandRecord:
@@ -517,7 +526,7 @@ class Bot(GatewayModule):
             admin = getattr(model, "admin", None)
             if admin is not None:
                 command.admin = admin
-            if isinstance(command, ManagementCommand):
+            if isinstance(command, (ManagementCommand, ScheduleCommand)):
                 command._bot = self
             if AgentCommand is not None and isinstance(command, AgentCommand):
                 command._admin_authorizer = self.is_management_admin
@@ -706,20 +715,23 @@ class Bot(GatewayModule):
                     csp.schedule_alarm(a_scheduled, next_run_at, record.command)
 
         # Handle scheduled command triggers
-        if csp.ticked(a_scheduled) and self._schedule_store.get(a_scheduled.schedule_id) is not None:
-            # Removed schedules may still have an outstanding CSP alarm; the
-            # store is the source of truth and acts as the tombstone check.
-            s_to_process.append(a_scheduled)
-
-            # Reschedule recurring commands
-            if a_scheduled.schedule:
-                now = csp.now()
-                next_time = croniter(a_scheduled.schedule, now).get_next(datetime)
-                if next_time >= now:
-                    self._store_scheduled_command(a_scheduled, next_time)
-                    csp.schedule_alarm(a_scheduled, next_time, a_scheduled)
-            else:
-                self._remove_scheduled_command(a_scheduled.schedule_id)
+        if csp.ticked(a_scheduled):
+            record = self._schedule_store.get(a_scheduled.schedule_id)
+            now = csp.now()
+            # A cancelled, superseded, or duplicate alarm must not execute.
+            if record is not None and self._datetime_for_now(record.next_run_at, now) == now:
+                execution = cast(BotCommand, record.command.copy())
+                execution.delay = None
+                execution.schedule = ""
+                if record.is_recurring:
+                    execution.id = uuid4().hex
+                    execution.schedule_id = ""
+                    next_time = croniter(record.command.schedule, now).get_next(datetime)
+                    self._store_scheduled_command(record.command, next_time)
+                    csp.schedule_alarm(a_scheduled, next_time, record.command)
+                else:
+                    self._remove_scheduled_command(record.schedule_id)
+                s_to_process.append(execution)
 
         # Handle new commands
         if csp.ticked(cmd):
@@ -744,8 +756,16 @@ class Bot(GatewayModule):
             next_cycle_commands = []
 
             for command in s_to_process:
+                if command.prepare_on_run:
+                    command.prepare_on_run = False
+                    command = self._prepare_command(command, now=csp.now())
+                    if command is None:
+                        continue
+                    if command.delay or command.schedule:
+                        next_cycle_commands.append(command)
+                        continue
                 log.debug(f"Executing command: {command.command}")
-                result = self._execute_command(command)
+                result = self._execute_command(command, now=csp.now())
 
                 log.debug(f"Command {command.command} execution returned: {result}")
                 if result:
@@ -991,6 +1011,8 @@ class Bot(GatewayModule):
         channel_id: str,
         text: str,
         mentions: list[User],
+        *,
+        prepare: bool = True,
     ) -> BotCommand | list[BotCommand] | None:
         """Extract bot commands from a message.
 
@@ -1114,14 +1136,7 @@ class Bot(GatewayModule):
                 times_run=0,
             )
 
-            # Pre-execute hooks
-            if getattr(command_runner, "admin", False) and (not self.is_management_admin(backend, source.id) or target_channel != channel_id):
-                return bot_cmd
-            if isinstance(command_runner, ScheduleCommand):
-                return command_runner.preexecute(bot_cmd, self._schedule_store, self)
-            elif isinstance(command_runner, StatusCommand):
-                return command_runner.preexecute(bot_cmd, self)
-            return command_runner.preexecute(bot_cmd)
+            return self._prepare_command(bot_cmd) if prepare else bot_cmd
 
         except Exception:
             log.exception("Error extracting command")
@@ -1189,7 +1204,7 @@ class Bot(GatewayModule):
         )
 
         log.info(f"Routing reply to active agent session: command={command_name}, user={source.id}")
-        return command_runner.preexecute(bot_cmd)
+        return self._prepare_command(bot_cmd)
 
     def _parse_command_args(
         self,
@@ -1290,7 +1305,63 @@ class Bot(GatewayModule):
             times_run=0,
         )
 
-    def _execute_command(self, cmd: BotCommand) -> Message | list[Message] | BotCommand | list[BotCommand] | None:
+    @staticmethod
+    def _command_fingerprint(cmd: BotCommand) -> tuple:
+        user_id = cmd.source.id if cmd.source is not None else ""
+        return cmd.backend, user_id, cmd.channel_id, cmd.command, tuple(cmd.args or ()), tuple(sorted(user.id for user in cmd.targets or ()))
+
+    def _burst_error(self, cmd: BotCommand, now: datetime | None) -> str | None:
+        now = now or datetime.now(UTC)
+        now = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
+        window = timedelta(seconds=5)
+        for key, recent in list(self._recent_commands.items()):
+            if now - recent[-1] >= window:
+                del self._recent_commands[key]
+                self._burst_notified.discard(key)
+        key = self._command_fingerprint(cmd)
+        recent = self._recent_commands.setdefault(key, deque())
+        while recent and now - recent[0] >= window:
+            recent.popleft()
+        if len(recent) < 3:
+            recent.append(now)
+            self._burst_notified.discard(key)
+            return None
+        removed = {cmd.schedule_id} if cmd.schedule_id else set()
+        cancel = getattr(self._commands.get(cmd.command), "cancel_command", None)
+        for record in self._schedule_store.records():
+            if self._command_fingerprint(record.command) == key:
+                self._remove_scheduled_command(record.schedule_id)
+                removed.add(record.schedule_id)
+                if cancel is not None:
+                    cancel(record.command)
+        if cancel is not None:
+            cancel(cmd)
+        if key in self._burst_notified:
+            return ""
+        self._burst_notified.add(key)
+        error = f"Stopped /{cmd.command}: more than 3 matching executions in 5 seconds."
+        if removed:
+            error += f" Removed schedules: {', '.join(sorted(removed))}."
+        log.warning("%s backend=%s user=%s channel=%s", error, cmd.backend, key[1], cmd.channel_id)
+        return error
+
+    def _prepare_command(self, cmd: BotCommand, *, now: datetime | None = None) -> BotCommand | None:
+        runner = self._commands[cmd.command]
+        origin = cmd.message.channel_id if cmd.message and cmd.message.channel_id else cmd.channel_id
+        if getattr(runner, "admin", False) and (not self.is_management_admin(cmd.backend, cmd.source.id) or cmd.channel_id != origin):
+            return cmd
+        cmd.execution_error = self._burst_error(cmd, now)
+        if cmd.execution_error is not None:
+            return cmd
+        if isinstance(runner, StatusCommand):
+            prepared = runner.preexecute(cmd, self)
+        else:
+            prepared = runner.preexecute(cmd) if isinstance(runner, BaseCommand) else cmd
+        if prepared is not None:
+            prepared.burst_checked = True
+        return prepared
+
+    def _execute_command(self, cmd: BotCommand, *, now: datetime | None = None) -> Message | list[Message | BotCommand] | BotCommand | None:
         """Execute a bot command and return responses."""
         command_runner = self._commands.get(cmd.command)
         if not command_runner:
@@ -1313,12 +1384,20 @@ class Bot(GatewayModule):
                 ]
             log.info("Management action command=%s backend=%s user=%s channel=%s", cmd.command, cmd.backend, cmd.source.id, origin)
 
+        if cmd.execution_error is None and not cmd.burst_checked:
+            cmd.execution_error = self._burst_error(cmd, now)
+        cmd.burst_checked = False
+        if cmd.execution_error is not None:
+            if not cmd.execution_error:
+                return None
+            return [Message(content=cmd.execution_error, channel=cmd.channel, backend=cmd.backend, metadata={"backend": cmd.backend})]
+
         try:
             if isinstance(command_runner, BaseCommand):
                 if isinstance(command_runner, HelpCommand):
                     responses = command_runner.execute(cmd, MappingProxyType(self._commands), self.is_management_admin)
                 elif isinstance(command_runner, ScheduleCommand):
-                    responses = command_runner.execute(cmd, self._schedule_store)
+                    responses = command_runner.execute(cmd, now=now)
                 else:
                     responses = command_runner.execute(cmd)
             elif isinstance(command_runner, Command):
