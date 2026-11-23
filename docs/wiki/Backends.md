@@ -9,6 +9,9 @@ This page is the reference for which backends exist, how to authenticate them, a
 | Symphony | [point72/csp-adapter-symphony](https://github.com/point72/csp-adapter-symphony)             | Official  |
 | Discord  | [csp-community/csp-adapter-discord](https://github.com/csp-community/csp-adapter-discord)   | Community |
 | Telegram | [csp-community/csp-adapter-telegram](https://github.com/csp-community/csp-adapter-telegram) | Community |
+| Zulip    | [csp-community/csp-adapter-zulip](https://github.com/csp-community/csp-adapter-zulip)       | Community |
+| IRC      | [csp-community/csp-adapter-irc](https://github.com/csp-community/csp-adapter-irc)           | Community |
+| Matrix   | [csp-community/csp-adapter-matrix](https://github.com/csp-community/csp-adapter-matrix)     | Community |
 
 The adapters are optional dependencies — install the ones you need:
 
@@ -20,13 +23,16 @@ pip install csp-adapter-slack csp-adapter-telegram
 
 Each backend reads its credentials from environment variables, matching the names used by the built-in `backend` configs.
 
-| Backend        | Environment variables                                                     | `chatom` config field                          |
-| :------------- | :------------------------------------------------------------------------ | :--------------------------------------------- |
-| Slack          | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`                                      | `bot_token`, `app_token`                       |
-| Discord        | `DISCORD_TOKEN`                                                           | `token`                                        |
-| Symphony       | `SYMPHONY_HOST`, `SYMPHONY_BOT_USERNAME`, `SYMPHONY_CERT_PATH`            | `host`, `bot_username`, `bot_certificate_path` |
-| Symphony (RSA) | `SYMPHONY_HOST`, `SYMPHONY_BOT_USERNAME`, `SYMPHONY_BOT_PRIVATE_KEY_PATH` | `host`, `bot_username`, `bot_private_key_path` |
-| Telegram       | `TELEGRAM_BOT_TOKEN`                                                      | `bot_token`                                    |
+| Backend        | Environment variables                                                            | `chatom` config field                                |
+| :------------- | :------------------------------------------------------------------------------- | :--------------------------------------------------- |
+| Slack          | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`                                             | `bot_token`, `app_token`                             |
+| Discord        | `DISCORD_TOKEN`                                                                  | `token`                                              |
+| Symphony       | `SYMPHONY_HOST`, `SYMPHONY_BOT_USERNAME`, `SYMPHONY_CERT_PATH`                   | `host`, `bot_username`, `bot_certificate_path`       |
+| Symphony (RSA) | `SYMPHONY_HOST`, `SYMPHONY_BOT_USERNAME`, `SYMPHONY_BOT_PRIVATE_KEY_PATH`        | `host`, `bot_username`, `bot_private_key_path`       |
+| Telegram       | `TELEGRAM_BOT_TOKEN`                                                             | `bot_token`                                          |
+| Zulip          | `ZULIP_SITE`, `ZULIP_EMAIL`, `ZULIP_API_KEY`                                     | `site`, `email`, `api_key`                           |
+| IRC            | `IRC_SERVER`, `IRC_PORT`, `IRC_NICKNAME`, `IRC_PASSWORD`                         | `server`, `port`, `nickname`, `password`             |
+| Matrix         | `MATRIX_HOMESERVER`, `MATRIX_USER_ID`, `MATRIX_ACCESS_TOKEN`, `MATRIX_DEVICE_ID` | `homeserver`, `user_id`, `access_token`, `device_id` |
 
 Symphony needs a host, a bot username, and either a certificate or an RSA private key.
 Two presets cover both: `backend=symphony` uses certificate authentication with a combined certificate/key `.pem` file on disk (`bot_certificate_path`), and `backend=symphony_rsa` uses an RSA private key (`bot_private_key_path`), which is what `symphony-bdk` configurations and Symphony's developer sandbox use.
@@ -50,6 +56,9 @@ For platform-specific setup of tokens and bot accounts, follow the adapter guide
 - [Symphony Adapter setup](https://github.com/Point72/csp-adapter-symphony/wiki/Setup)
 - [Discord Adapter setup](https://github.com/csp-community/csp-adapter-discord/wiki/Setup)
 - [Telegram Adapter](https://github.com/csp-community/csp-adapter-telegram/wiki)
+- [Zulip bot setup](https://1kbgz.github.io/chatom/docs/src/howto-setup-zulip.html)
+- [IRC bot setup](https://1kbgz.github.io/chatom/docs/src/howto-setup-irc.html)
+- [Matrix bot setup](https://1kbgz.github.io/chatom/docs/src/howto-setup-matrix.html)
 
 ## Feature matrix
 
@@ -70,3 +79,6 @@ Response formatting varies between backends, and built-in commands render their 
 | Symphony | Custom HTML      | Yes    | Yes    |
 | Discord  | Minimal Markdown | No     | Yes    |
 | Telegram | HTML             | No     | Yes    |
+| Zulip    | Markdown         | No     | Yes    |
+| IRC      | Plain text       | No     | No     |
+| Matrix   | HTML             | No     | No     |

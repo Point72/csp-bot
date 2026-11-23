@@ -22,7 +22,7 @@ __all__ = (
     "sanitize_message",
 )
 
-Backend = Literal["discord", "slack", "symphony", "telegram"]
+Backend = Literal["discord", "irc", "matrix", "slack", "symphony", "telegram", "zulip"]
 
 
 def is_valid_url(url: str) -> bool:

@@ -1,0 +1,12 @@
+# @package modules.bot.config
+# Uses an access token and device id from a one-time password login, so a
+# restart reuses the same Matrix device instead of creating a new one.
+matrix:
+  _target_: csp_bot.MatrixConfig
+  bot_name: ${bot_name}
+  config:
+    _target_: chatom.matrix.MatrixConfig
+    homeserver: ${oc.env:MATRIX_HOMESERVER}
+    user_id: ${oc.env:MATRIX_USER_ID}
+    access_token: ${oc.env:MATRIX_ACCESS_TOKEN}
+    device_id: ${oc.env:MATRIX_DEVICE_ID}

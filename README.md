@@ -21,7 +21,7 @@ It is built on [csp](https://github.com/point72/csp), [csp-gateway](https://gith
 `csp-bot` makes it easy to build extensible command-driven bots, and has some key features:
 
 - connect to multiple backend chat platforms from the same instance
-- supports Slack, Symphony, Discord, and Telegram
+- supports Slack, Symphony, Discord, Telegram, Zulip, IRC, and Matrix
 - register custom commands across backends
 - create scheduled commands
 - create asynchronous commands
@@ -143,6 +143,9 @@ remain separate.
 | Discord  | Channel ID and message ID through message edit/delete.                                             |
 | Telegram | Chat ID and message ID through text edit/delete; catalog management requires no history retrieval. |
 | Symphony | Stream/message IDs for updates and message ID for suppression.                                     |
+| Zulip    | Message ID through message update/delete.                                                          |
+| Matrix   | Room ID and event ID; an edit sends an `m.replace` event and a delete redacts the event.           |
+| IRC      | Not supported, because IRC messages cannot be edited or deleted.                                   |
 
 Local agent commands, including `/ask`, also expose `delete_message` only to
 configured management admins. Existing channel and authorship checks still

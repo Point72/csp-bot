@@ -17,7 +17,7 @@ __version__ = "2.0.4"
 from chatom import Channel, Message, User
 
 from .bot import Bot
-from .bot_config import BotConfig, DiscordConfig, SlackConfig, SymphonyConfig, TelegramConfig
+from .bot_config import BotConfig, DiscordConfig, IRCConfig, MatrixConfig, SlackConfig, SymphonyConfig, TelegramConfig, ZulipConfig
 from .commands import (
     BaseCommand,
     BaseCommandModel,
@@ -70,8 +70,10 @@ __all__ = (
     "GatewayModule",
     "GatewaySettings",
     "HelpCommand",
+    "IRCConfig",
     "InMemoryStateStore",
     "LegacyCommandAdapter",
+    "MatrixConfig",
     "Message",
     "NoResponseCommand",
     "ReplyCommand",
@@ -88,6 +90,7 @@ __all__ = (
     "SymphonyConfig",
     "TelegramConfig",
     "User",
+    "ZulipConfig",
     "__version__",
     "command",
     "format_message",
