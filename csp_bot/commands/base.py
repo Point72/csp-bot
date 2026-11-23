@@ -75,11 +75,12 @@ class BaseCommand(ABC):
     def execute(
         self,
         command: BotCommand,
-    ) -> Union[Message, BotMessage, list[Message], list[BotMessage], "BaseCommand", list["BaseCommand"], None]:
+    ) -> Union[Message, BotMessage, BotCommand, list[Message | BotCommand], list[BotMessage], "BaseCommand", list["BaseCommand"], None]:
         """Execute the command and return response(s).
 
         Commands can return:
         - Message or BotMessage: Sent to the user
+        - BotCommand or mixed Message/BotCommand list: Commands queued for the next cycle
         - BaseCommand: Queued for next cycle
         - List of above: Multiple items
         - None: No response

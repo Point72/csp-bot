@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from chatom import Message, User
 
 from csp_bot import Bot, BotConfig
-from csp_bot.commands.schedule import ScheduleCommand
+from csp_bot.commands.schedule import ScheduleCommandModel
 from csp_bot.persistence import InMemoryStateStore, ScheduleStore
 from csp_bot.structs import BotCommand, CommandVariant
 
@@ -33,7 +33,10 @@ def test_schedule_list_uses_stable_schedule_id():
     command = _make_command(command="schedule", message_id="list")
     command.args = ("list",)
 
-    message = ScheduleCommand().execute(command, schedule_store)
+    bot = Bot(config=BotConfig())
+    bot.set_schedule_store(schedule_store)
+    bot.load_commands([ScheduleCommandModel()])
+    message = bot._execute_command(command)[0]
 
     assert "schedule-1" in message.content
     assert "/echo" in message.content
@@ -44,12 +47,13 @@ def test_schedule_remove_uses_stable_schedule_id():
     schedule_store.put(_make_command(), schedule_id="schedule-1")
     bot = Bot(config=BotConfig())
     bot.set_schedule_store(schedule_store)
+    bot.load_commands([ScheduleCommandModel()])
     command = _make_command(command="schedule", message_id="remove")
-    command.args = ("remove", "schedule-1")
+    command.args = ("remove schedule-1",)
 
-    result = ScheduleCommand().preexecute(command, schedule_store, bot)
+    result = bot._execute_command(command)
 
-    assert result is None
+    assert result[0].content == "Removed schedule schedule-1."
     assert schedule_store.get("schedule-1") is None
 
 

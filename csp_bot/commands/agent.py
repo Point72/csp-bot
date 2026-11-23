@@ -562,9 +562,8 @@ class AgentCommand(ReplyCommand):
 
     def _command_key(self, command: BotCommand) -> str:
         """Unique key for tracking in-flight futures."""
-        # Use the message ID for stability across reschedules
-        msg_id = command.message.id if command.message else ""
-        return f"{self.command()}:{command.source.id}:{msg_id}"
+        # Invocation IDs remain stable across polling and differ between recurring runs.
+        return f"{self.command()}:{command.backend}:{command.source.id}:{command.channel_id}:{command.id}"
 
     def _status_channel(self, command: BotCommand) -> Channel:
         """Return the channel where status/progress messages should go.
@@ -770,6 +769,16 @@ class AgentCommand(ReplyCommand):
         command.delay = _utc_now() + timedelta(seconds=self.poll_interval)
         return command
 
+    def cancel_command(self, command: BotCommand) -> None:
+        """Stop in-flight work when its command is blocked."""
+        key = self._command_key(command)
+        control = self._run_controls.pop(key, None)
+        if control is not None:
+            control.cancel()
+        future = self._futures.pop(key, None)
+        if future is not None:
+            future.cancel()
+
     def execute(self, command: BotCommand) -> Message | list[Message | BaseCommand] | BaseCommand | None:
         """Return result when ready; reschedule if still running."""
         # Handle errors from preexecute
@@ -795,11 +804,7 @@ class AgentCommand(ReplyCommand):
             # Check timeout
             elapsed = command.times_run * self.poll_interval
             if elapsed >= self.timeout:
-                self._futures.pop(key, None)
-                control = self._run_controls.pop(key, None)
-                if control is not None:
-                    control.cancel()
-                future.cancel()
+                self.cancel_command(command)
                 return Message(
                     content="Sorry, the AI request timed out. Please try again.",
                     channel=command.channel,
