@@ -22,10 +22,28 @@ if TYPE_CHECKING:
 log = getLogger(__name__)
 
 
+def _channel_type(value: object) -> str:
+    return str(getattr(value, "value", value)).lower()
+
+
 class ManagementCommand(ReplyCommand):
     """Management commands receive their owning bot during registration."""
 
     _bot: "Bot"
+
+    def _in_direct_message(self, command: BotCommand) -> bool:
+        """Whether the command came from a one-to-one conversation with the bot.
+
+        Group DMs do not count, because they can include users who are not admins.
+        """
+        msg = command.message
+        if msg is None:
+            return False
+        if msg.channel is not None and _channel_type(msg.channel.channel_type) == "group":
+            return False
+        if _channel_type((msg.metadata or {}).get("channel_type")) == "group":
+            return False
+        return self._bot._is_direct_message(msg, command.backend)
 
 
 class AdminCommand(ManagementCommand):
@@ -62,15 +80,15 @@ class LogsCommand(AdminCommand):
         return "Logs"
 
     def help(self) -> str:
-        return "Show recent bot logs in a configured log channel. Admin only."
+        return "Show recent bot logs in a DM with the bot or a configured log channel. Admin only."
 
     def usage(self) -> str:
         return "/logs [lines: 1-200]"
 
     def execute(self, command: BotCommand) -> Message:
         config = self._bot.config.management
-        if command.channel_id not in config.log_channels.get(command.backend, set()):
-            content = "Use a configured log channel to retrieve logs."
+        if command.channel_id not in config.log_channels.get(command.backend, set()) and not self._in_direct_message(command):
+            content = "Use a direct message with the bot or a configured log channel to retrieve logs."
         elif not config.log_file:
             content = "Bot log retrieval is not configured."
         else:
@@ -111,8 +129,10 @@ class MessagesCommand(AdminCommand):
     def execute(self, command: BotCommand) -> Message:
         content = f"Usage: {self.usage()}"
         args = command.args or ("list",)
-        if command.channel_id not in self._bot.config.management.message_channels.get(command.backend, set()):
-            content = "Use a configured message management channel."
+        if command.channel_id not in self._bot.config.management.message_channels.get(command.backend, set()) and not self._in_direct_message(
+            command
+        ):
+            content = "Use a direct message with the bot or a configured message management channel."
         elif args[0] == "list" and len(args) <= 2:
             try:
                 records, cursor = self._bot._sent_messages.page(command.backend, args[1] if len(args) == 2 else "")
