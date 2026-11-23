@@ -1,0 +1,9 @@
+# @package modules.bot.config
+zulip:
+  _target_: csp_bot.ZulipConfig
+  bot_name: ${bot_name}
+  config:
+    _target_: chatom.zulip.ZulipConfig
+    site: ${oc.env:ZULIP_SITE}
+    email: ${oc.env:ZULIP_EMAIL}
+    api_key: ${oc.env:ZULIP_API_KEY}

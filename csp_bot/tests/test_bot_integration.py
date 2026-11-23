@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from chatom import Channel, ChannelType, Message, User
+from chatom.csp import BackendRunner
 from chatom.discord import DiscordChannel
 from pydantic import Field
 
@@ -617,6 +618,25 @@ class TestChannelResolution:
             assert _channel is None or hasattr(_channel, "id")
 
 
+class _CountingConfig:
+    def __init__(self, fail: bool = False):
+        self.fail = fail
+        self.connects = 0
+
+
+class _CountingBackend:
+    def __init__(self, config: _CountingConfig):
+        self.config = config
+
+    async def connect(self):
+        if self.config.fail:
+            raise ConnectionError("refused")
+        self.config.connects += 1
+
+    async def disconnect(self):
+        pass
+
+
 class TestEnsureBackendConnected:
     """Tests for the _ensure_backend_connected method and event loop management."""
 
@@ -641,6 +661,32 @@ class TestEnsureBackendConnected:
         result = bot_with_symphony._ensure_backend_connected("nonexistent")
 
         assert result is None
+
+    def test_ensure_backend_connected_shares_the_adapter_runner(self, bot_with_symphony):
+        """The bot borrows the connection the adapter's reader and writer use."""
+        adapter = MagicMock()
+        adapter.backend = _CountingBackend(config=_CountingConfig())
+        bot_with_symphony._adapters["symphony"] = adapter
+
+        backend, loop = bot_with_symphony._ensure_backend_connected("symphony")
+
+        runner = BackendRunner._registry[id(adapter.backend)]
+        try:
+            assert backend is runner.backend
+            assert loop is runner.loop
+            assert asyncio.run_coroutine_threadsafe(asyncio.sleep(0, "ok"), loop).result(5) == "ok"
+            assert adapter.backend.config.connects == 1
+        finally:
+            runner.release()
+
+    def test_ensure_backend_connected_returns_none_when_connect_fails(self, bot_with_symphony):
+        adapter = MagicMock()
+        adapter.backend = _CountingBackend(config=_CountingConfig(fail=True))
+        bot_with_symphony._adapters["symphony"] = adapter
+
+        assert bot_with_symphony._ensure_backend_connected("symphony") is None
+        assert id(adapter.backend) not in BackendRunner._registry
+        assert "symphony" not in bot_with_symphony._connected_backends
 
     def test_connected_backends_dict_initialized_empty(self, bot_with_symphony):
         """Test that _connected_backends starts empty."""
@@ -788,13 +834,20 @@ class TestExtractCommands:
             ("<@UBOT123>/test", "slack", "UBOT123"),
             ("<@UBOT123>!test", "slack", "UBOT123"),
             ("<@!UBOT123> /test", "discord", "UBOT123"),
+            ("@**TestBot** /test", "zulip", "1242013"),
+            ("@**TestBot|1242013** /test", "zulip", "1242013"),
+            ("@_**TestBot** !test", "zulip", "1242013"),
+            ("@**test-bot** /test", "zulip", "1242013"),
+            ("test-bot: !test", "irc", "test-bot"),
+            ("test-bot, !test", "irc", "test-bot"),
+            ("@test-bot !test", "irc", "test-bot"),
         ],
     )
     def test_extract_command_strips_bot_mention(self, bot_with_symphony, text, backend, bot_id):
-        """Test that <@BOT_ID> mentions are stripped before command parsing."""
-        bot_with_symphony._configs[backend] = MagicMock()
+        """Mentions by id, configured name, or platform name are stripped before command parsing."""
+        bot_with_symphony._configs[backend] = MagicMock(bot_name="TestBot")
         bot_with_symphony._bot_user_ids[backend] = bot_id
-        bot_with_symphony._bot_names[backend] = "TestBot"
+        bot_with_symphony._bot_names[backend] = "test-bot"
 
         class TestCmd(ReplyToOtherCommand):
             def command(self):
@@ -1106,6 +1159,22 @@ class TestDirectMessageDetection:
         assert channel_id == "dm123"
         assert text == "!help"
         assert mentions == []
+
+    def test_system_message_is_never_to_bot_even_in_a_dm(self, bot_with_symphony):
+        """An IRC NOTICE arrives as a DM but must not get a reply."""
+        bot_with_symphony._configs["irc"] = MagicMock(bot_name="chatom-bot")
+        bot_with_symphony._bot_user_ids["irc"] = "chatom-bot"
+
+        msg = Message(
+            id="notice1",
+            content="You are now identified for chatom-bot.",
+            author=User(id="NickServ"),
+            channel=Channel(id="NickServ", channel_type=ChannelType.DIRECT),
+            is_system=True,
+            backend="irc",
+        )
+
+        assert bot_with_symphony._is_message_to_bot(msg, "irc") == (False, "", "", [])
 
 
 class TestBackendFiltering:

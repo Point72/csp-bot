@@ -27,16 +27,20 @@ from typing import Any, ClassVar
 import csp
 from chatom import Channel, Message, User, mention_user_for_backend
 from chatom.base import parse_mentions
+from chatom.csp import BackendRunner
 from croniter import croniter
 from csp import Outputs, ts
 from pydantic import PrivateAttr
 
 from .backends import (
     DiscordAdapter,
+    IRCAdapter,
+    MatrixAdapter,
     SlackAdapter,
     SymphonyAdapter,
     SymphonyPresenceStatus,
     TelegramAdapter,
+    ZulipAdapter,
 )
 from .bot_config import BotConfig
 from .commands import (
@@ -95,7 +99,7 @@ class Bot(GatewayModule):
     _thread: threading.Thread | None = PrivateAttr(None)
     _lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
-    _KNOWN_BACKENDS: ClassVar[set[str]] = {"discord", "slack", "symphony", "telegram"}
+    _KNOWN_BACKENDS: ClassVar[set[str]] = {"discord", "irc", "matrix", "slack", "symphony", "telegram", "zulip"}
 
     @staticmethod
     def _datetime_for_now(value: datetime | None, now: datetime) -> datetime | None:
@@ -173,6 +177,27 @@ class Bot(GatewayModule):
             self._configs["telegram"] = self.config.telegram
             self._adapters["telegram"] = TelegramAdapter(self.config.telegram.config)
 
+        # Initialize Zulip
+        if self.config.zulip:
+            if ZulipAdapter is None:
+                raise ImportError("Zulip adapter not installed. Please install csp-adapter-zulip.")
+            self._configs["zulip"] = self.config.zulip
+            self._adapters["zulip"] = ZulipAdapter(self.config.zulip.config)
+
+        # Initialize IRC
+        if self.config.irc:
+            if IRCAdapter is None:
+                raise ImportError("IRC adapter not installed. Please install csp-adapter-irc.")
+            self._configs["irc"] = self.config.irc
+            self._adapters["irc"] = IRCAdapter(self.config.irc.config)
+
+        # Initialize Matrix
+        if self.config.matrix:
+            if MatrixAdapter is None:
+                raise ImportError("Matrix adapter not installed. Please install csp-adapter-matrix.")
+            self._configs["matrix"] = self.config.matrix
+            self._adapters["matrix"] = MatrixAdapter(self.config.matrix.config)
+
         # Fetch bot info for all backends at startup
         for backend in self._adapters:
             log.info(f"Fetching bot info for {backend}...")
@@ -249,7 +274,7 @@ class Bot(GatewayModule):
             self._adapters["symphony"].publish_presence(presence)
 
         # Set up user access queries
-        for backend in ["symphony", "slack", "discord", "telegram"]:
+        for backend in ["symphony", "slack", "discord", "telegram", "zulip", "irc", "matrix"]:
             config = self._configs.get(backend)
             if config and config.user_access_channels:
                 self._update_user_access(backend)
@@ -388,8 +413,10 @@ class Bot(GatewayModule):
     def _ensure_backend_connected(self, backend: str) -> tuple[Any, asyncio.AbstractEventLoop] | None:
         """Ensure a connected backend exists for the given platform.
 
-        Lazily creates and connects a backend instance that can be reused
-        for API calls like fetching bot info or resolving channels.
+        Borrows the adapter's shared runner, the same connection its reader
+        and writer use, for API calls like fetching bot info or resolving
+        channels. The loop runs on the runner's thread, so submit work to it
+        with ``asyncio.run_coroutine_threadsafe``.
 
         Args:
             backend: The backend platform name (e.g., "symphony", "slack").
@@ -406,27 +433,18 @@ class Bot(GatewayModule):
             log.warning(f"No adapter for backend: {backend}")
             return None
 
-        # Create a persistent event loop for this backend
-        # Using a dedicated loop avoids "Event loop is closed" errors
-        loop = asyncio.new_event_loop()
-
-        # Create and connect a new backend instance
-        backend_class = type(adapter.backend)
-        new_backend = backend_class(config=adapter.backend.config)
-
-        async def _connect():
-            await new_backend.connect()
-            return new_backend
-
+        # The bot keeps this reference for its lifetime, so the connection
+        # outlives graph restarts of the reader and writer.
+        runner = BackendRunner.acquire(adapter.backend)
         try:
-            loop.run_until_complete(_connect())
-            self._connected_backends[backend] = (new_backend, loop)
-            log.info(f"Created connected backend for {backend}")
-            return (new_backend, loop)
+            connected_backend = runner.ready()
         except Exception:
             log.exception(f"Failed to create connected backend for {backend}")
-            loop.close()
+            runner.release()
             return None
+        self._connected_backends[backend] = (connected_backend, runner.loop)
+        log.info(f"Created connected backend for {backend}")
+        return (connected_backend, runner.loop)
 
     def _resolve_channel(self, channel_identifier: str, backend: str) -> Channel | None:
         """Resolve a channel name or ID to a Channel object.
@@ -463,7 +481,7 @@ class Bot(GatewayModule):
             return channel
 
         try:
-            return loop.run_until_complete(_fetch())
+            return asyncio.run_coroutine_threadsafe(_fetch(), loop).result()
         except Exception:
             log.exception(f"Error resolving channel: {channel_identifier}")
             return None
@@ -771,6 +789,12 @@ class Bot(GatewayModule):
         if not config:
             return False, "", "", []
 
+        # Never answer a system message such as an IRC NOTICE. IRC forbids
+        # automatic replies to notices, which is what keeps two bots (or a bot
+        # and NickServ) from answering each other forever.
+        if msg.is_system:
+            return False, "", "", []
+
         # Get content and channel - extract plain text for Symphony
         raw_content = msg.content or ""
         if backend == "symphony":
@@ -911,7 +935,7 @@ class Bot(GatewayModule):
                 log.info(f"Bot info for {backend}: id={bot_info.id}, name={self._bot_names[backend]}")
 
         try:
-            loop.run_until_complete(_fetch())
+            asyncio.run_coroutine_threadsafe(_fetch(), loop).result()
         except Exception:
             log.exception("Error fetching bot info for %s", backend)
 
@@ -983,6 +1007,13 @@ class Bot(GatewayModule):
             # Strip @bot_name format (Symphony/generic)
             if bot_name and content.startswith(f"@{bot_name}"):
                 content = content[len(f"@{bot_name}") :].strip()
+
+            # Strip a leading mention by the configured name or the platform's own
+            # name: @**name**, @**name|id** or the silent @_**name** on Zulip, and
+            # name:, name, or @name on IRC.
+            for name in {bot_name, self._bot_names.get(backend)} - {None, ""}:
+                escaped = re.escape(str(name))
+                content = re.sub(rf"^(?:@_?\*\*{escaped}(?:\|\d+)?\*\*|@?{escaped}[:,]?(?=\s|$))", "", content).strip()
 
             log.info(f"Extracting command from: {content!r}")
 

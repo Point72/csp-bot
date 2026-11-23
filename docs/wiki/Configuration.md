@@ -9,7 +9,7 @@ In `csp-bot`, this means commands, backends, and their settings are all controll
 `csp-bot` exposes two Hydra config groups:
 
 - `gateway` — assembles the bot module and the `csp-gateway` server around it.
-- `backend` — one fragment per chat platform (`slack`, `discord`, `symphony`, `telegram`), each contributing its configuration to the bot.
+- `backend` — one fragment per chat platform (`slack`, `discord`, `symphony`, `telegram`, `zulip`, `irc`, `matrix`), each contributing its configuration to the bot.
 
 The `backend` group is what makes running against any mix of platforms easy.
 Because each fragment writes to a different field of the bot config, you can select **any combination** of them at once.

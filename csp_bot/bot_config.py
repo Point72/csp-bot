@@ -9,19 +9,25 @@ from pydantic import Field
 
 from .backends import (
     DiscordConfig as ChatomDiscordConfig,
+    IRCConfig as ChatomIRCConfig,
+    MatrixConfig as ChatomMatrixConfig,
     SlackConfig as ChatomSlackConfig,
     SymphonyConfig as ChatomSymphonyConfig,
     TelegramConfig as ChatomTelegramConfig,
+    ZulipConfig as ChatomZulipConfig,
 )
 
 __all__ = (
     "BackendConfig",
     "BotConfig",
     "DiscordConfig",
+    "IRCConfig",
     "ManagementConfig",
+    "MatrixConfig",
     "SlackConfig",
     "SymphonyConfig",
     "TelegramConfig",
+    "ZulipConfig",
 )
 
 
@@ -99,6 +105,33 @@ class TelegramConfig(BackendConfig):
     )
 
 
+class ZulipConfig(BackendConfig):
+    """Zulip bot configuration."""
+
+    config: ChatomZulipConfig = Field(
+        default_factory=ChatomZulipConfig,
+        description="Chatom Zulip configuration.",
+    )
+
+
+class IRCConfig(BackendConfig):
+    """IRC bot configuration."""
+
+    config: ChatomIRCConfig = Field(
+        default_factory=ChatomIRCConfig,
+        description="Chatom IRC configuration.",
+    )
+
+
+class MatrixConfig(BackendConfig):
+    """Matrix bot configuration."""
+
+    config: ChatomMatrixConfig = Field(
+        default_factory=ChatomMatrixConfig,
+        description="Chatom Matrix configuration.",
+    )
+
+
 class ManagementConfig(BaseModel):
     """Explicit backend-scoped administrators and log access."""
 
@@ -124,6 +157,9 @@ class BotConfig(BaseModel):
     slack: SlackConfig | None = None
     symphony: SymphonyConfig | None = None
     telegram: TelegramConfig | None = None
+    zulip: ZulipConfig | None = None
+    irc: IRCConfig | None = None
+    matrix: MatrixConfig | None = None
     management: ManagementConfig = Field(default_factory=ManagementConfig)
 
     ratelimit_seconds: float = Field(

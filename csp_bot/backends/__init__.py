@@ -8,6 +8,9 @@ unified interface. Each backend exposes:
 """
 
 from .discord import *
+from .irc import *
+from .matrix import *
 from .slack import *
 from .symphony import *
 from .telegram import *
+from .zulip import *

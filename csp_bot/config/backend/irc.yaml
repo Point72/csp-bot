@@ -1,0 +1,12 @@
+# @package modules.bot.config
+# Channels to join go in modules.bot.config.irc.config.channels. Without any,
+# the bot still answers direct messages.
+irc:
+  _target_: csp_bot.IRCConfig
+  bot_name: ${bot_name}
+  config:
+    _target_: chatom.irc.IRCConfig
+    server: ${oc.env:IRC_SERVER}
+    port: ${oc.env:IRC_PORT,6697}
+    nickname: ${oc.env:IRC_NICKNAME}
+    password: ${oc.env:IRC_PASSWORD,""}

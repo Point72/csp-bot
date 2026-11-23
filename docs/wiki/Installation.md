@@ -24,6 +24,9 @@ pip install csp-adapter-slack       # Slack
 pip install csp-adapter-discord     # Discord
 pip install csp-adapter-symphony    # Symphony
 pip install csp-adapter-telegram    # Telegram
+pip install csp-adapter-zulip       # Zulip
+pip install csp-adapter-irc         # IRC
+pip install csp-adapter-matrix      # Matrix
 ```
 
 See [Backends](Backends) for credentials and per-platform setup.
