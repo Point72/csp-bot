@@ -58,13 +58,13 @@ conda install csp csp-bot -c conda-forge
 
 The default configuration includes `/whoami`, `/logs`, and `/messages`.
 
-| Command                      | Access                                            | Behavior                                                                                                                           |
-| ---------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `/whoami`                    | Any authorized bot user                           | Show backend, user ID, channel ID, and management role.                                                                            |
-| `/logs [lines]`              | Admin, in a configured log channel                | Show the last 50 lines by default; accept 1-200 lines, reading at most 64 KiB and displaying at most 3,000 characters of log text. |
-| `/messages list [before-id]` | Admin, in a configured message management channel | Browse recent bot sends across rooms on the invoking backend, five per page.                                                       |
-| `/messages edit <id> <text>` | Admin, in a configured message management channel | Replace the text of a recorded message.                                                                                            |
-| `/messages delete <id>`      | Admin, in a configured message management channel | Delete one recorded message.                                                                                                       |
+| Command                      | Access                                                                 | Behavior                                                                                                                           |
+| ---------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `/whoami`                    | Any authorized bot user                                                | Show backend, user ID, channel ID, and management role.                                                                            |
+| `/logs [lines]`              | Admin, in a DM with the bot or a configured log channel                | Show the last 50 lines by default; accept 1-200 lines, reading at most 64 KiB and displaying at most 3,000 characters of log text. |
+| `/messages list [before-id]` | Admin, in a DM with the bot or a configured message management channel | Browse recent bot sends across rooms on the invoking backend, five per page.                                                       |
+| `/messages edit <id> <text>` | Admin, in a DM with the bot or a configured message management channel | Replace the text of a recorded message.                                                                                            |
+| `/messages delete <id>`      | Admin, in a DM with the bot or a configured message management channel | Delete one recorded message.                                                                                                       |
 
 Management administrators are configured by backend and user ID. Display names
 and membership in a log channel do not grant admin access. Empty admin lists
@@ -103,10 +103,11 @@ modules:
 ```
 
 `log_file` is an operator-configured path; `/logs` cannot select another file.
-Log retrieval is disabled until both a file and a permitted destination are
-configured. Logs can include chat content and operational details, so configured
-log channels should be private. A permitted channel controls the destination;
-each caller must still be an admin.
+Log retrieval is disabled until a file is configured. An admin can retrieve logs
+in a one-to-one DM with the bot or in a channel listed in `log_channels`. Group
+DMs do not count. Logs can include chat content and operational details, so
+configured log channels should be private. A permitted channel controls the
+destination; each caller must still be an admin.
 
 `/logs` and `/messages` reject reply-destination redirects. Admin access is checked before
 command preprocessing and again at execution. Attempts are recorded in the bot
@@ -136,8 +137,8 @@ backfill platform history. It is in memory by default; `Bot.set_state_store()`
 also configures catalog persistence through the existing state-store interface.
 Observing sends does not depend on a platform message-history API.
 
-Message management requires both a configured admin and a permitted destination
-in `message_channels`. Listings can include previews from private rooms and DMs,
+Message management requires a configured admin, in a one-to-one DM with the bot
+or a permitted destination in `message_channels`. Listings can include previews from private rooms and DMs,
 so permitted destinations should be private. An admin on one backend does not
 gain access to another backend's records. These are bot-wide administrators
 within that backend, rather than room-only moderators.

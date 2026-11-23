@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from chatom import Channel, Message, User
+from chatom import Channel, ChannelType, Message, User
 from chatom.base.capabilities import BackendCapabilities, Capability
 
 from csp_bot import Bot, BotCommand, BotConfig
@@ -331,3 +331,24 @@ def test_config_can_make_a_framework_command_admin_only(bot):
 
     flagged = _bot_with(bot, [CommandModel(command=Greet, admin=True)])
     assert "Admin access required" in _content(flagged, _command("greet", user="member"))
+
+
+def _dm(command, channel_type=ChannelType.DIRECT):
+    command.message.channel = Channel(id=command.channel_id, channel_type=channel_type)
+    return command
+
+
+@pytest.mark.parametrize("name,args", [("logs", ("2",)), ("messages", ("list",))])
+def test_admins_can_manage_from_a_direct_message(bot, name, args):
+    content = _content(bot, _dm(_command(name, args, channel="dm-admin")))
+    assert "configured" not in content
+
+
+@pytest.mark.parametrize("name,args", [("logs", ("2",)), ("messages", ("list",))])
+def test_group_direct_messages_are_not_management_channels(bot, name, args):
+    content = _content(bot, _dm(_command(name, args, channel="group-dm"), ChannelType.GROUP))
+    assert "configured" in content
+
+
+def test_direct_messages_still_require_an_admin(bot):
+    assert "Admin access required" in _content(bot, _dm(_command("logs", user="member", channel="dm-member")))
